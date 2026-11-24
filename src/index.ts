@@ -106,6 +106,65 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
   return result;
 }
 
+
+async function handleTelegramSetup(request: Request, env: Env): Promise<Response> {
+  if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) {
+    return json({ ok: false, error: "Telegram bot token or webhook secret is not configured" }, 503);
+  }
+  const url = new URL(request.url);
+  if (url.protocol !== "https:" || !url.hostname.endsWith(".workers.dev")) {
+    return json({ ok: false, error: "Webhook setup must be called on the deployed HTTPS workers.dev URL" }, 400);
+  }
+  const webhookUrl = `${url.origin}/telegram/webhook`;
+  const apiBase = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+  const setResponse = await fetch(`${apiBase}/setWebhook`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      url: webhookUrl,
+      secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ["message"],
+      drop_pending_updates: false,
+    }),
+  });
+  const setResult: unknown = await setResponse.json().catch(() => null);
+  if (!setResponse.ok || !asObject(setResult) || setResult.ok !== true) {
+    return json({ ok: false, step: "setWebhook", telegram: setResult }, 502);
+  }
+  const infoResponse = await fetch(`${apiBase}/getWebhookInfo`);
+  const infoResult: unknown = await infoResponse.json().catch(() => null);
+  if (!infoResponse.ok || !asObject(infoResult) || infoResult.ok !== true || !asObject(infoResult.result)) {
+    return json({ ok: false, step: "getWebhookInfo", telegram: infoResult }, 502);
+  }
+  const info = infoResult.result;
+  return json({
+    ok: info.url === webhookUrl,
+    webhookConfigured: info.url === webhookUrl,
+    pendingUpdateCount: info.pending_update_count,
+    lastErrorDate: info.last_error_date ?? null,
+    lastErrorMessage: info.last_error_message ?? null,
+  }, info.url === webhookUrl ? 200 : 502);
+}
+
+async function handleTelegramWebhookInfo(request: Request, env: Env): Promise<Response> {
+  if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
+  if (!env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: "Telegram bot token is not configured" }, 503);
+  const response = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getWebhookInfo`);
+  const result: unknown = await response.json().catch(() => null);
+  if (!response.ok || !asObject(result) || result.ok !== true || !asObject(result.result)) {
+    return json({ ok: false, error: "Telegram getWebhookInfo failed" }, 502);
+  }
+  const info = result.result;
+  return json({
+    ok: true,
+    webhookConfigured: typeof info.url === "string" && info.url.endsWith("/telegram/webhook"),
+    pendingUpdateCount: info.pending_update_count,
+    lastErrorDate: info.last_error_date ?? null,
+    lastErrorMessage: info.last_error_message ?? null,
+  });
+}
+
 async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("x-telegram-bot-api-secret-token") !== env.TELEGRAM_WEBHOOK_SECRET) return json({ ok: false }, 401);
   let update: unknown;
@@ -135,6 +194,8 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") return json({ service: "XAU AI Supervisor", version: "0.3.0", mode: "analysis-and-alerts-only", endpoints: ["GET /health", "POST /market/candles", "POST /macro/context", "POST /risk/snapshot", "POST /analysis/run", "GET /analysis/latest", "POST /telegram/webhook"] });
   if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), aiReviewEnabled: env.ENABLE_AI_REVIEW === "true", aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
+  if (request.method === "POST" && url.pathname === "/telegram/setup-webhook") return handleTelegramSetup(request, env);
+  if (request.method === "GET" && url.pathname === "/telegram/webhook-info") return handleTelegramWebhookInfo(request, env);
   if (request.method === "POST" && url.pathname === "/telegram/webhook") return handleTelegram(request, env);
   if (["/market/candles", "/macro/context", "/risk/snapshot", "/analysis/run"].includes(url.pathname) && request.method === "POST" && !authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
   if (request.method === "POST" && url.pathname === "/market/candles") {
