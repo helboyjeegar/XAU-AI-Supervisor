@@ -1,54 +1,104 @@
 # XAU AI Supervisor
 
-A Cloudflare Worker-based supervisory service for XAU/USD signal validation and Telegram notifications.
+A signal-only XAU/USD research and risk-supervision service. The architecture is inspired by the specialist-agent workflow in [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), but this repository is an independent implementation tailored to gold and short-horizon multi-timeframe analysis.
 
-## Current MVP
+> **Safety:** This project does not connect to a broker or place orders. A BUY/SELL result is an analytical alert only. The engine fails closed when candle data, macro context, or the daily-equity snapshot is missing or stale. Do not use it for live trading until independent backtesting, forward testing and account-specific validation are complete.
 
-- Health endpoint: `GET /health`
-- Signal intake: `POST /signal`
-- Telegram command webhook: `POST /telegram/webhook`
-- Signal checks: payload authentication, symbol/side/price validation, minimum confidence, minimum risk/reward, daily lock check.
-- Duplicate signal suppression when KV is configured.
-- No broker execution. Accepted signals are notifications only.
+## Current implementation (0.3.0)
 
-## Deploy
+- Cloudflare Worker API with authenticated market-data and risk ingestion.
+- D1 persistence for OHLCV candles, analysis decisions, daily risk state and macro context.
+- Four specialist modules: Gold Technical Analyst, Quant Research, Macro Strategy and Risk Analysis; a deterministic supervisor combines their findings.
+- 1m entry analysis with 5m and 30m trend context.
+- EMA(20/50), Wilder RSI(14), ATR(14), Keltner envelope, repeated-range tests, tick-volume comparison and rejection-wick anatomy.
+- Daily drawdown lock based on externally supplied start-of-day and current equity. The current equity must include floating PnL.
+- Telegram notifications with a 15-minute same-direction alert cooldown and `/status`, `/analyze`, `/help` commands.
+- Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
+- Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
+- GitHub Actions type-check and unit-test workflow.
 
-1. Install Node.js (LTS).
-2. Run `npm install`.
-3. Create a Cloudflare KV namespace and bind it as `SUPERVISOR_KV` in `wrangler.toml`.
-4. Set secrets:
-   - `npx wrangler secret put TELEGRAM_BOT_TOKEN`
-   - `npx wrangler secret put TELEGRAM_CHAT_ID`
-   - `npx wrangler secret put WEBHOOK_SECRET`
-5. Run `npm run typecheck`.
-6. Run `npm run deploy`.
+The score is an **evidence score, not a statistically calibrated probability**. Standard RSI is not the proprietary Luxe Algo Ultimate RSI; tick volume is broker-specific and is not centralized spot-gold volume. Proprietary indicator readings are not fabricated.
 
-Do not commit tokens, secrets, account credentials, or private webhook URLs.
+## Runtime architecture
 
-## Signal payload
-
-Send a POST request to `/signal` with JSON:
-
-```json
-{
-  "id": "unique-signal-id",
-  "symbol": "XAUUSD",
-  "side": "BUY",
-  "entry": 2650.0,
-  "stopLoss": 2647.0,
-  "takeProfit": 2655.0,
-  "confidence": 82,
-  "strategy": "TradingView alert",
-  "secret": "YOUR_WEBHOOK_SECRET"
-}
+```text
+Market feed / MT5 bridge / authorized chart webhook
+                     |
+                     v
+              Cloudflare Worker
+        +------------+-------------+
+        |            |             |
+    Candle API   Macro API    Equity/Risk API
+        |            |             |
+        +------------+-------------+
+                     v
+                Cloudflare D1
+                     |
+          1m / 5m / 30m analysis
+                     |
+       +-------------+-------------+
+       |             |             |
+   Gold Technical  Quant       Macro + Risk
+       +-------------+-------------+
+                     |
+              Supervisor veto
+                     |
+             Telegram alert
 ```
 
-The example prices are illustrative only. The service does not generate a market signal or place an order.
+TradingAgents itself currently presents a research CLI and specialist-agent framework; it does not execute trades. We reuse its specialist-role and supervisor pattern, not its entire CLI runtime. See its [README](https://github.com/TauricResearch/TradingAgents) and [Apache-2.0 license](https://github.com/TauricResearch/TradingAgents/blob/main/LICENSE).
 
-## Telegram
+## API
 
-Configure Telegram's webhook to point to `https://YOUR-WORKER.workers.dev/telegram/webhook`. The configured chat can use `/help` and `/status`.
+All administrative ingestion endpoints require `X-Ingest-Secret`.
 
-## Important limitations
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Runtime configuration health |
+| POST | `/market/candles` | Store 1m, 5m or 30m XAUUSD candles |
+| POST | `/macro/context` | Store a timestamped macro/calendar snapshot |
+| POST | `/risk/snapshot` | Store day-start/current equity and update the daily loss lock |
+| POST | `/analysis/run` | Run the specialist pipeline |
+| GET | `/analysis/latest` | Read the latest decision (authenticated) |
+| POST | `/telegram/webhook` | Telegram bot webhook with Telegram secret-token verification |
 
-This is the first deployable foundation, not yet an autonomous AI trading system. It currently receives externally generated signals; it does not fetch live market data, calculate indicators, run a backtest, or execute trades. Daily loss state is scaffolding only until trade-result ingestion and persistent risk accounting are implemented. Do not use it for live trading or rely on it as a financial risk control until those features have been implemented and tested.
+See [docs/DATA_CONTRACT.md](docs/DATA_CONTRACT.md) for request payloads.
+
+## Development
+
+Requires Node.js 22+.
+
+```bash
+npm install
+npm run check
+npm run dev
+```
+
+## Cloudflare deployment
+
+1. Create a Cloudflare D1 database named `xau-ai-supervisor`.
+2. Add its ID to the `DB` D1 binding in `wrangler.toml`.
+3. Apply `migrations/0001_init.sql` (or run the documented Wrangler migration command after creating the database binding).
+4. Add Worker secrets: `INGEST_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`.
+5. Connect GitHub repository branch `develop` in **Workers & Pages → Create application → GitHub**. Build command: `npm install && npm run check`; deploy command: `npx wrangler deploy`.
+6. Configure Telegram's webhook URL and secret token as described in [docs/DEPLOYMENT_FA.md](docs/DEPLOYMENT_FA.md).
+7. Keep `ENABLE_AI_REVIEW=false` during initial deployment. Workers AI has quotas; enable the veto-only reviewer only after verifying the account's free-plan allowance and testing.
+
+The D1 binding is intentionally commented out until the real database ID exists. Do not add tokens or account credentials to GitHub.
+
+## Free-tier expectations
+
+The architecture avoids a dedicated always-on server. Cloudflare Free is quota-limited, not unlimited: Workers, D1 and Workers AI each have usage ceilings. The current release does not require a paid LLM API. The optional Workers AI reviewer is disabled by default; its free-plan availability is quota-limited and is not an unlimited inference service. A reliable live economic calendar, gold price feed, or AI model may have separate quotas or paid tiers; no provider is represented as unlimited-free.
+
+## Roadmap
+
+1. Verify Worker + D1 + Telegram end-to-end in the user's Cloudflare account.
+2. Implement a secure MT5 desktop Expert Advisor bridge for 1m/5m/30m candles and equity snapshots; Android MT5 cannot run an EA.
+3. Add sourced macro/calendar and dollar/yield adapters with timestamp and freshness guarantees.
+4. Backtest using broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
+5. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
+6. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
+
+## License
+
+This independent project does not redistribute TradingAgents source code. It references the upstream project's public design and Apache-2.0 license; see the upstream repository for its license terms.
