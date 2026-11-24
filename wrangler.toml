@@ -1,6 +1,6 @@
 name = "xau-ai-supervisor"
 main = "src/index.ts"
-compatibility_date = "2026-11-25"
+compatibility_date = "2026-11-24"
 workers_dev = true
 
 [vars]
