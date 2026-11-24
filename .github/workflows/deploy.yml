@@ -27,7 +27,11 @@ jobs:
       - name: Run typecheck and tests
         run: npm run check
       - name: Deploy Worker
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: f81155bdfd40ce84a8127b091e151bf9
+      - name: Explain missing deployment credential
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "Deployment skipped. Add CLOUDFLARE_API_TOKEN in GitHub repository Actions secrets to enable automatic deployment."
