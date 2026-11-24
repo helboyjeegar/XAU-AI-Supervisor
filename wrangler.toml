@@ -16,11 +16,10 @@ ALERT_COOLDOWN_MINUTES = "15"
 ENABLE_AI_REVIEW = "false"
 AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 
-# Create the D1 database in Cloudflare, then uncomment and set its real database_id.
-# [[d1_databases]]
-# binding = "DB"
-# database_name = "xau-ai-supervisor"
-# database_id = "YOUR_D1_DATABASE_ID"
+[[d1_databases]]
+binding = "DB"
+database_name = "xau-ai-supervisor"
+database_id = "e12e9c25-597f-4f13-b065-123ee1f2041e"
 
 [triggers]
 crons = ["*/5 * * * *", "0 2 * * *"]
