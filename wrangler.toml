@@ -1,0 +1,17 @@
+name = "xau-ai-supervisor"
+main = "src/index.ts"
+compatibility_date = "2026-11-25"
+workers_dev = true
+
+[vars]
+MIN_CONFIDENCE = "70"
+MIN_RISK_REWARD = "1.2"
+MAX_DAILY_LOSS_PERCENT = "5"
+
+# Create a KV namespace and uncomment after binding its ID.
+# [[kv_namespaces]]
+# binding = "SUPERVISOR_KV"
+# id = "YOUR_KV_NAMESPACE_ID"
+
+[triggers]
+crons = ["*/5 * * * *"]
