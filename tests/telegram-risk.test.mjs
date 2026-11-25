@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseRiskCommand } from "../src/telegram.ts";
+import { formatStatus, parseRiskCommand } from "../src/telegram.ts";
 
 test("parses a manual risk snapshot", () => {
   assert.deepEqual(parseRiskCommand("/risk 10000 9950"), {
@@ -28,4 +28,18 @@ test("rejects malformed, missing, zero and excessive values", () => {
     "/risk 10000.12345 9000",
     "/risk 1000000001 9000",
   ]) assert.equal(parseRiskCommand(value), null, value);
+});
+
+test("status distinguishes stale risk snapshots from fresh manual snapshots", () => {
+  const stale = formatStatus({
+    verified: false, locked: false, lossPercent: 0, maxDailyLossPercent: 5,
+    updatedAt: Date.now() - 5 * 60_000,
+  });
+  assert.match(stale, /snapshot قدیمی یا نامعتبر است/);
+
+  const fresh = formatStatus({
+    verified: true, locked: false, lossPercent: 0, maxDailyLossPercent: 5,
+    updatedAt: Date.now(),
+  });
+  assert.match(fresh, /بدون تأیید مستقل بروکر/);
 });
