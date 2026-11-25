@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   parseBlsIcs,
   parseBlsScheduleHtml,
+  parseXoomarCalendar,
   parseBeaJson,
   parseFomcHtml,
   highImpactEventWithinBlock,
@@ -56,6 +57,45 @@ test("BLS annual HTML schedule rejects stale official pages", () => {
     "<p>Last Modified Date: October 01, 2026</p>",
   ].join("");
   assert.throws(() => parseBlsScheduleHtml(stale, now), /maximum age 45 days/);
+});
+
+
+test("XOOMAR fallback validates freshness, attribution and official source coverage", () => {
+  const payload = {
+    updatedAt: "2026-11-25T14:55:00.000Z",
+    meta: { sourceAttribution: "Data: XOOMAR" },
+    data: [
+      { source: "bls", eventName: "Consumer Price Index", importance: "high", scheduledAt: "2026-12-10T13:30:00.000Z" },
+      { source: "bea", eventName: "Personal Income and Outlays (PCE)", importance: "high", scheduledAt: "2026-12-23T13:30:00.000Z" },
+      { source: "fed", eventName: "FOMC Rate Decision", importance: "high", scheduledAt: "2026-12-09T19:00:00.000Z" },
+      { source: "bls", eventName: "Low importance test event", importance: "low", scheduledAt: "2026-12-05T13:30:00.000Z" }
+    ]
+  };
+  const result = parseXoomarCalendar(JSON.stringify(payload), now);
+  assert.equal(result.events.length, 3);
+  assert.equal(result.attribution, "Data: XOOMAR");
+  assert.equal(result.events[0].source, "BLS");
+  assert.equal(result.events[1].source, "BEA");
+  assert.equal(result.events[2].source, "FOMC");
+});
+
+test("XOOMAR fallback rejects stale data and missing attribution", () => {
+  const base = {
+    meta: { sourceAttribution: "Data: XOOMAR" },
+    data: [
+      { source: "bls", eventName: "CPI", importance: "high", scheduledAt: "2026-12-10T13:30:00.000Z" },
+      { source: "bea", eventName: "PCE", importance: "high", scheduledAt: "2026-12-23T13:30:00.000Z" },
+      { source: "fed", eventName: "FOMC Rate Decision", importance: "high", scheduledAt: "2026-12-09T19:00:00.000Z" }
+    ]
+  };
+  assert.throws(
+    () => parseXoomarCalendar(JSON.stringify({ ...base, updatedAt: "2026-11-20T14:55:00.000Z" }), now),
+    /older than 48 hours/
+  );
+  assert.throws(
+    () => parseXoomarCalendar(JSON.stringify({ ...base, updatedAt: "2026-11-25T14:55:00.000Z", meta: {} }), now),
+    /missing its required source attribution/
+  );
 });
 
 test("BEA release JSON accepts fresh GDP and PCE schedule entries", () => {
