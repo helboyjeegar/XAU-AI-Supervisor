@@ -110,6 +110,16 @@ function analyzeTechnical(candles: Candle[], one: TimeframeSnapshot): { buy: num
   if (current.close > previous.high) { buy += 5; buyEvidence.push("بسته‌شدن بالای سقف کندل قبلی"); }
   if (current.close < previous.low) { sell += 5; sellEvidence.push("بسته‌شدن پایین کف کندل قبلی"); }
   if (candles.slice(-20).some((c) => c.volume <= 0)) warnings.push("حجم معتبر برای همه کندل‌ها دریافت نشده؛ تأیید حجمی ناقص است");
+  if (buyEvidence.length === 0 && sellEvidence.length === 0) {
+    const checks = [
+      "RSI=" + currentRsi.toFixed(1) + "؛ برگشت از محدوده ۲۰/۸۰ دیده نشد",
+      "بازگشت تأییدشده از باند کلتنر ثبت نشد",
+      "آزمون و رد تکراری حمایت یا مقاومت ثبت نشد",
+      "تأیید حجم تیک یا سایه رد قیمت ثبت نشد",
+      "شکست سقف یا کف کندل قبلی با بسته‌شدن قیمت ثبت نشد",
+    ];
+    warnings.unshift("ستاپ یک‌دقیقه‌ای شکل نگرفت: " + checks.join("؛ "));
+  }
 
   return { buy, sell, evidence: { BUY: buyEvidence, SELL: sellEvidence }, warnings };
 }
