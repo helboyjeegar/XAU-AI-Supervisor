@@ -15,7 +15,7 @@ export function formatAnalysis(result: AnalysisResult): string {
     const blockers = result.blockers.slice(0, 5).map((item) => `• ${item}`).join("\n");
     const technical = result.agents.find((agent) => agent.agent === "Gold Technical Analyst");
     const technicalNote = technical?.warnings.find((item) => item.startsWith("ستاپ یک‌دقیقه‌ای"));
-    return ["XAU AI SUPERVISOR — بدون معامله", `امتیاز شواهد: ${result.score}/100 (احتمال آماری نیست)`, `بازبینی AI: ${result.aiReviewStatus ?? "NOT_RUN"}`, blockers || "شرایط ورود تأیید نشد", technicalNote ? "وضعیت تکنیکال: " + technicalNote : "", "هیچ سفارشی اجرا نشده است."].filter(Boolean).join("\n");
+    return ["XAU AI SUPERVISOR — بدون معامله", `موتور پژوهش: ${result.researchStatus ?? "قدیمی/نامشخص"}`, `امتیاز شواهد: ${result.score}/100 (احتمال آماری نیست)`, `بازبینی AI: ${result.aiReviewStatus ?? "NOT_RUN"}`, blockers || "شرایط ورود تأیید نشد", technicalNote ? "وضعیت تکنیکال: " + technicalNote : "", "هیچ سفارشی اجرا نشده است."].filter(Boolean).join("\n");
   }
   return [
     `XAU AI SUPERVISOR — ${result.verdict}`,

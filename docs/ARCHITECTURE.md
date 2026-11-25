@@ -64,7 +64,10 @@ No paid model provider may be enabled silently. Before enabling a model route, v
 
 - Architecture plan and upstream-compatible agent/skill specifications are on the feature branch.
 - A Worker-safe evidence-linked specialist-report contract has been added with fail-closed tests.
-- London/New York IANA session eligibility is wired into the feature-branch analysis entry point; boundary, overlap, weekend and DST tests are included. This change is not deployed.
+- A Worker-compatible TradingAgents orchestration module runs isolated Macro and Quant specialists, then Risk Analysis, then the main coordinator; malformed output, missing citations, stale inputs, risk vetoes and model failure fail closed.
+- Research runs, evidence records and specialist reports have dedicated D1 tables and a migration. The runtime model flag remains disabled by default until free quota and billing state are confirmed.
+- The feature-branch analysis route uses the TradingAgents port; the prior heuristic analyzer is no longer called by the Worker entry point. The deployed Worker is unchanged.
+- London/New York IANA session eligibility is wired into the feature-branch analysis entry point; boundary, overlap, weekend and DST tests are included. Scheduled data refresh and analysis are also gated to the permitted session windows. This change is not deployed.
 - The existing live `analyzeMarket` path has not yet been replaced or wired to these contracts.
 - Model-client adapter, specialist orchestration, evidence persistence and end-to-end tests remain pending review.
 - The live Worker and `develop` remain unchanged until the replacement passes CI and staging smoke tests.

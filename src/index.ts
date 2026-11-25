@@ -1,8 +1,8 @@
-import { analyzeMarket } from "./analysis.ts";
 import { getTradingSessionStatus } from "./trading-sessions.ts";
+import { runTradingAgentsResearch } from "./tradingagents-engine.ts";
+import { saveResearchRun, latestResearchRun, deleteOldResearchRuns } from "./research-storage.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { refreshSiftingMarketData } from "./market-feed.ts";
-import { challengeCandidate } from "./ai-challenger.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import type { AnalysisResult, Candle, Env, MacroContext, RiskStatus, Timeframe } from "./types.ts";
@@ -141,25 +141,18 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
   const session = getTradingSessionStatus(Date.now());
   if (!session.allowed) {
     return {
-      id: crypto.randomUUID(),
-      symbol: "XAUUSD",
-      generatedAt: session.checkedAt,
-      verdict: "NO_TRADE",
-      side: "NEUTRAL",
-      score: 0,
-      scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY",
-      entry: null,
-      stopLoss: null,
-      takeProfit: null,
-      riskReward: null,
-      reasons: [],
-      blockers: ["خارج از ساعات مجاز معامله؛ تحلیل ورود فقط در سشن لندن (08:00–17:00 به وقت لندن) یا نیویورک (08:00–17:00 به وقت نیویورک)، دوشنبه تا جمعه، مجاز است."],
-      warnings: ["فیلتر سشن با منطقه زمانی IANA اعمال شده است؛ تغییر ساعت تابستانی لندن و نیویورک به‌صورت خودکار لحاظ می‌شود."],
-      agents: [],
-      timeframes: {},
+      id: crypto.randomUUID(), symbol: "XAUUSD", generatedAt: session.checkedAt,
+      verdict: "NO_TRADE", side: "NEUTRAL", score: 0,
+      scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY", entry: null, stopLoss: null,
+      takeProfit: null, riskReward: null, reasons: [],
+      blockers: ["خارج از ساعات مجاز؛ تحلیل ورود فقط در سشن لندن یا نیویورک و در روزهای کاری فعال است."],
+      warnings: ["ساعت سشن‌ها بر اساس منطقه زمانی IANA و تغییر ساعت تابستانی محاسبه می‌شود."],
+      agents: [], timeframes: {},
+      researchStatus: env.ENABLE_TRADINGAGENTS === "true" ? "BLOCKED" : "DISABLED",
     };
   }
   if (!env.DB) throw new Error("D1 database is not configured");
+  const now = Date.now();
   const [one, five, thirty, risk, storedMacro] = await Promise.all([
     loadCandles(env.DB, "XAUUSD", "1m", 300),
     loadCandles(env.DB, "XAUUSD", "5m", 300),
@@ -167,64 +160,33 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     readRisk(env),
     latestMacroContext(env.DB),
   ]);
-  let result = analyzeMarket({
-    oneMinute: one,
-    fiveMinute: five,
-    thirtyMinute: thirty,
-    macro: storedMacro,
-    risk,
-    now: Date.now(),
+  const execution = await runTradingAgentsResearch({
+    oneMinute: one, fiveMinute: five, thirtyMinute: thirty, macro: storedMacro,
+    risk, now, modelName: env.AI_MODEL || "@cf/google/gemma-4-26b-a4b-it",
     minRiskReward: setting(env.MIN_RISK_REWARD, 1.5),
     stopAtrMultiplier: setting(env.STOP_ATR_MULTIPLIER, 1.2),
-    minScore: setting(env.MIN_SIGNAL_SCORE, 75),
-    highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
     macroMaxAgeMinutes: setting(env.MACRO_MAX_AGE_MINUTES, 30),
-  });
-
-  if (env.SIFTING_API_KEY) {
-    result = {
-      ...result,
-      warnings: [
-        ...result.warnings,
-        "منبع قیمت: SiftingIO؛ قیمت مرجع تجمیعی است و ممکن است با قیمت نماد بروکر تفاوت داشته باشد. حجم نیز تعداد تغییرات قیمت (Tick Count) است، نه حجم رسمی معاملات. پیش از هر تصمیم، قیمت را با نمودار بروکر تطبیق بده.",
-      ],
-    };
+    highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
+    riskMaxAgeMs: setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
+    marketDataSource: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "D1 candle store; provider not recorded",
+  }, env.AI, env.ENABLE_TRADINGAGENTS === "true");
+  if (execution.result.researchStatus !== "DISABLED") {
+    await saveResearchRun(env.DB, {
+      runId: execution.runId, createdAt: execution.result.generatedAt,
+      status: execution.result.researchStatus ?? "FAILED", result: execution.result,
+      evidence: execution.evidence, reports: execution.reports,
+    });
   }
-
-  if (result.verdict !== "NO_TRADE") {
-    const review = await challengeCandidate(env, result);
-    if (!review.enabled) {
-      result = { ...result, aiReviewStatus: "DISABLED" };
-    } else if (!review.available || review.veto) {
-      result = {
-        ...result,
-        aiReviewStatus: review.available ? "VETOED" : "UNAVAILABLE",
-        verdict: "NO_TRADE",
-        side: "NEUTRAL",
-        entry: null,
-        stopLoss: null,
-        takeProfit: null,
-        riskReward: null,
-        blockers: [...result.blockers, ...review.reasons],
-      };
-    } else {
-      result = { ...result, aiReviewStatus: "PASSED" };
-    }
-  } else {
-    result = { ...result, aiReviewStatus: env.ENABLE_AI_REVIEW === "true" ? "NOT_RUN" : "DISABLED" };
-  }
-
-  await saveAnalysis(env.DB, result);
-  if (notify && result.verdict !== "NO_TRADE") {
+  await saveAnalysis(env.DB, execution.result);
+  if (notify && execution.result.verdict !== "NO_TRADE") {
     const cooldownMs = setting(env.ALERT_COOLDOWN_MINUTES, 15) * 60_000;
-    if (await claimSignalNotification(env.DB, result.verdict, result.generatedAt, cooldownMs)) {
-      const sent = await sendTelegram(env, formatAnalysis(result));
-      if (!sent) await releaseSignalNotification(env.DB, result.generatedAt);
+    if (await claimSignalNotification(env.DB, execution.result.verdict, execution.result.generatedAt, cooldownMs)) {
+      const sent = await sendTelegram(env, formatAnalysis(execution.result));
+      if (!sent) await releaseSignalNotification(env.DB, execution.result.generatedAt);
     }
   }
-  return result;
+  return execution.result;
 }
-
 
 async function handleTelegramSetup(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
@@ -323,7 +285,10 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const command = messageText.split(/\s+/, 1)[0].split("@", 1)[0];
   if (!env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return json({ ok: true, ignored: true });
   if (command === "/help" || command === "/start") {
-    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و سیستم\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+  } else if (command === "/test") {
+    const sent = await sendTelegram(env, "آزمایش تلگرام: پیام فرمان دریافت شد و ارسال پاسخ از Worker انجام شد. هیچ تحلیلی یا سفارشی اجرا نشده است.");
+    if (!sent) console.error("Telegram test reply could not be sent");
   } else if (command === "/risk") {
     if (!env.DB) {
       await sendTelegram(env, "ثبت ریسک انجام نشد: پایگاه داده در دسترس نیست.");
@@ -365,9 +330,15 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     let verdict: string | undefined;
     try { verdict = latest ? (JSON.parse(latest.payload_json) as AnalysisResult).verdict : undefined; } catch { verdict = "خطا در خواندن آخرین تحلیل"; }
     const feedStatus = await formatMarketFeedStatus(env);
-    await sendTelegram(env, formatStatus(risk, verdict) + "\n\n" + feedStatus);
+    const session = getTradingSessionStatus(Date.now());
+    const engineStatus = env.ENABLE_TRADINGAGENTS === "true" && env.AI && env.DB
+      ? "فعال و آماده اجرا" : "غیرفعال تا تأیید سهمیه/هزینه و آماده‌سازی پایگاه داده";
+    await sendTelegram(env, formatStatus(risk, verdict) +
+      "\nموتور TradingAgents: " + engineStatus +
+      "\nسشن مجاز: " + (session.allowed ? session.sessions.join(" + ") : "خارج از سشن") +
+      "\n\n" + feedStatus);
   } else if (command === "/analyze") {
-    try { await refreshMarketData(env); await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
+    try { if (getTradingSessionStatus(Date.now()).allowed) { await refreshMarketData(env); await refreshMacroCalendar(env); } const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
     catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
   } else {
     await sendTelegram(env, "دستور شناخته نشد. /help را بفرست.");
@@ -377,8 +348,8 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
 
 async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/") return json({ service: "XAU AI Supervisor", version: "0.3.0", mode: "analysis-and-alerts-only", endpoints: ["GET /health", "POST /market/candles", "POST /macro/context", "POST /risk/snapshot", "POST /analysis/run", "GET /analysis/latest", "POST /telegram/webhook"] });
-  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), marketDataConfigured: Boolean(env.SIFTING_API_KEY), marketDataProvider: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "not-configured", aiReviewEnabled: env.ENABLE_AI_REVIEW === "true", aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
+  if (request.method === "GET" && url.pathname === "/") return json({ service: "XAU AI Supervisor", version: "0.3.0", mode: "analysis-and-alerts-only", researchFramework: "TauricResearch/TradingAgents v1.0.1 Worker port", endpoints: ["GET /health", "POST /market/candles", "POST /macro/context", "POST /risk/snapshot", "POST /analysis/run", "GET /analysis/latest", "GET /research/latest", "POST /telegram/webhook"] });
+  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), marketDataConfigured: Boolean(env.SIFTING_API_KEY), marketDataProvider: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "not-configured", tradingAgentsEnabled: env.ENABLE_TRADINGAGENTS === "true", tradingAgentsReady: env.ENABLE_TRADINGAGENTS === "true" && Boolean(env.AI) && Boolean(env.DB), aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
   if (request.method === "POST" && url.pathname === "/telegram/setup-webhook") return handleTelegramSetup(request, env);
   if (request.method === "GET" && url.pathname === "/telegram/webhook-info") return handleTelegramWebhookInfo(request, env);
   if (request.method === "POST" && url.pathname === "/telegram/webhook") return handleTelegram(request, env);
@@ -421,6 +392,12 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     try { return json({ ok: true, analysis: await runAnalysis(env) }); }
     catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : "Analysis failed" }, 503); }
   }
+  if (request.method === "GET" && url.pathname === "/research/latest") {
+    if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
+    if (!env.DB) return json({ ok: false, error: "D1 database is not configured" }, 503);
+    const latest = await latestResearchRun(env.DB);
+    return latest ? new Response(latest.payload_json, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } }) : json({ ok: true, research: null });
+  }
   if (request.method === "GET" && url.pathname === "/analysis/latest") {
     if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
     if (!env.DB) return json({ ok: false, error: "D1 database is not configured" }, 503);
@@ -444,9 +421,15 @@ export default {
           const retention = Date.now() - 45 * 24 * 60 * 60 * 1000;
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
+          await deleteOldResearchRuns(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
         } else {
+          if (!getTradingSessionStatus(Date.now()).allowed) return;
           await refreshMarketData(env);
           await refreshMacroCalendar(env);
+          if (env.ENABLE_TRADINGAGENTS !== "true") return;
+          const latest = await latestResearchRun(env.DB!);
+          const minIntervalMs = setting(env.TRADINGAGENTS_MIN_INTERVAL_MINUTES, 15) * 60_000;
+          if (latest && Date.now() - latest.created_at < minIntervalMs) return;
           await runAnalysis(env);
         }
       } catch (error) {
