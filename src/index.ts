@@ -1,4 +1,5 @@
 import { analyzeMarket } from "./analysis.ts";
+import { getTradingSessionStatus } from "./trading-sessions.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { refreshSiftingMarketData } from "./market-feed.ts";
 import { challengeCandidate } from "./ai-challenger.ts";
@@ -137,6 +138,27 @@ async function refreshMacroCalendar(env: Env): Promise<void> {
 }
 
 async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
+  const session = getTradingSessionStatus(Date.now());
+  if (!session.allowed) {
+    return {
+      id: crypto.randomUUID(),
+      symbol: "XAUUSD",
+      generatedAt: session.checkedAt,
+      verdict: "NO_TRADE",
+      side: "NEUTRAL",
+      score: 0,
+      scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY",
+      entry: null,
+      stopLoss: null,
+      takeProfit: null,
+      riskReward: null,
+      reasons: [],
+      blockers: ["خارج از ساعات مجاز معامله؛ تحلیل ورود فقط در سشن لندن (08:00–17:00 به وقت لندن) یا نیویورک (08:00–17:00 به وقت نیویورک)، دوشنبه تا جمعه، مجاز است."],
+      warnings: ["فیلتر سشن با منطقه زمانی IANA اعمال شده است؛ تغییر ساعت تابستانی لندن و نیویورک به‌صورت خودکار لحاظ می‌شود."],
+      agents: [],
+      timeframes: {},
+    };
+  }
   if (!env.DB) throw new Error("D1 database is not configured");
   const [one, five, thirty, risk, storedMacro] = await Promise.all([
     loadCandles(env.DB, "XAUUSD", "1m", 300),
