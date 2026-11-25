@@ -3,13 +3,15 @@ import type { MacroContext } from "./types.ts";
 export interface CalendarEvent {
   at: number;
   title: string;
-  source: "BLS" | "BEA" | "FOMC";
+  source: "BLS" | "BEA" | "FOMC" | "OTHER";
 }
 
 const BLS_URL = "https://www.bls.gov/schedule/news_release/bls.ics";
 const BEA_URL = "https://apps.bea.gov/API/signup/release_dates.json";
 const FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm";
 const OFFICIAL_SOURCE = "official-us-macro-calendar-v1";
+const XOOMAR_SOURCE = "xoomar-us-calendar-v1";
+const XOOMAR_URL = "https://xoomar.com/api/markets/calendar";
 const REFRESH_INTERVAL_MS = 15 * 60_000;
 const MAX_SOURCE_AGE_MS = 60 * 24 * 60 * 60_000;
 const LOOKAHEAD_MS = 120 * 24 * 60 * 60_000;
@@ -316,6 +318,87 @@ export function parseFomcHtml(html: string, now = Date.now()): CalendarEvent[] {
   return events;
 }
 
+export interface XoomarCalendarResult {
+  events: CalendarEvent[];
+  updatedAt: number;
+  attribution: string;
+}
+
+export function parseXoomarCalendar(raw: string, now = Date.now()): XoomarCalendarResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("XOOMAR calendar response is not valid JSON");
+  }
+
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("XOOMAR calendar response has an invalid shape");
+  }
+
+  const envelope = parsed as Record<string, unknown>;
+  const updatedAt = typeof envelope.updatedAt === "string" ? Date.parse(envelope.updatedAt) : NaN;
+  if (
+    !Number.isFinite(updatedAt) ||
+    updatedAt > now + 5 * 60_000 ||
+    now - updatedAt > 48 * 60 * 60_000
+  ) {
+    throw new Error("XOOMAR calendar updatedAt is missing, future-dated or older than 48 hours");
+  }
+
+  const meta = typeof envelope.meta === "object" && envelope.meta !== null
+    ? envelope.meta as Record<string, unknown>
+    : {};
+  const attribution =
+    typeof meta.sourceAttribution === "string" ? meta.sourceAttribution.trim() : "";
+  if (!attribution) {
+    throw new Error("XOOMAR calendar is missing its required source attribution");
+  }
+
+  if (!Array.isArray(envelope.data)) {
+    throw new Error("XOOMAR calendar data field is not an array");
+  }
+
+  const events: CalendarEvent[] = [];
+  for (const item of envelope.data) {
+    if (typeof item !== "object" || item === null) continue;
+    const event = item as Record<string, unknown>;
+    if (typeof event.importance !== "string" || event.importance.toLowerCase() !== "high") continue;
+    if (typeof event.eventName !== "string" || typeof event.source !== "string") continue;
+    if (typeof event.scheduledAt !== "string") continue;
+
+    const at = Date.parse(event.scheduledAt);
+    if (!Number.isFinite(at) || at < now - 15 * 60_000 || at > now + LOOKAHEAD_MS) continue;
+
+    const sourceName = event.source.toLowerCase();
+    const source: CalendarEvent["source"] =
+      sourceName === "bls" ? "BLS" :
+      sourceName === "bea" ? "BEA" :
+      sourceName === "fed" ? "FOMC" : "OTHER";
+
+    events.push({ at, title: event.eventName, source });
+  }
+
+  const upcoming = events.filter((event) => event.at > now && event.at <= now + LOOKAHEAD_MS);
+  const sources = new Set(upcoming.map((event) => event.source));
+  if (upcoming.length === 0) {
+    throw new Error("XOOMAR calendar has no upcoming high-importance events in the 120-day window");
+  }
+  if (!sources.has("BLS") || !sources.has("BEA") || !sources.has("FOMC")) {
+    throw new Error("XOOMAR calendar does not cover upcoming BLS, BEA and FOMC events");
+  }
+
+  return { events, updatedAt, attribution };
+}
+
+async function fetchXoomarCalendarEvents(now: number): Promise<XoomarCalendarResult> {
+  const from = new Date(now).toISOString().slice(0, 10);
+  const to = new Date(now + LOOKAHEAD_MS).toISOString().slice(0, 10);
+  const url = XOOMAR_URL + "?from=" + from + "&to=" + to + "&importance=high";
+  const raw = await fetchText(url, "application/json");
+  return parseXoomarCalendar(raw, now);
+}
+
 export function highImpactEventWithinBlock(events: CalendarEvent[], now: number, blockMinutes = 15): CalendarEvent | null {
   const window = blockMinutes * 60_000;
   return events
@@ -328,24 +411,55 @@ export async function syncOfficialMacroCalendar(
   current: MacroContext | undefined,
   now = Date.now(),
 ): Promise<boolean> {
-  if (current?.source === OFFICIAL_SOURCE && current.asOf && now - current.asOf < REFRESH_INTERVAL_MS) {
+  if (
+    (current?.source === OFFICIAL_SOURCE || current?.source === XOOMAR_SOURCE) &&
+    current.asOf &&
+    now - current.asOf < REFRESH_INTERVAL_MS
+  ) {
     return false;
   }
 
-  const [blsEvents, beaRaw, fomcRaw] = await Promise.all([
-    fetchBlsEvents(now),
-    fetchText(BEA_URL, "application/json"),
-    fetchText(FOMC_URL, "text/html"),
-  ]);
+  let events: CalendarEvent[];
+  let source: string;
+  let sourceNote: string;
 
-  const events = [
-    ...blsEvents,
-    ...parseBeaJson(beaRaw, now),
-    ...parseFomcHtml(fomcRaw, now),
-  ];
-  const futureBls = events.filter((event) => event.source === "BLS" && event.at > now && event.at <= now + LOOKAHEAD_MS);
-  if (futureBls.length === 0) {
-    throw new Error("BLS calendar has no upcoming high-impact release in the coverage window");
+  try {
+    const [blsEvents, beaRaw, fomcRaw] = await Promise.all([
+      fetchBlsEvents(now),
+      fetchText(BEA_URL, "application/json"),
+      fetchText(FOMC_URL, "text/html"),
+    ]);
+    events = [
+      ...blsEvents,
+      ...parseBeaJson(beaRaw, now),
+      ...parseFomcHtml(fomcRaw, now),
+    ];
+    const futureBls = events.filter(
+      (event) => event.source === "BLS" && event.at > now && event.at <= now + LOOKAHEAD_MS,
+    );
+    if (futureBls.length === 0) {
+      throw new Error("Official BLS calendar has no upcoming high-impact release in the coverage window");
+    }
+    source = OFFICIAL_SOURCE;
+    sourceNote = "تقویم‌های رسمی BLS، BEA و Federal Reserve دریافت و اعتبارسنجی شدند.";
+  } catch (officialError) {
+    const officialDetail = officialError instanceof Error ? officialError.message : String(officialError);
+    try {
+      const fallback = await fetchXoomarCalendarEvents(now);
+      events = fallback.events;
+      source = XOOMAR_SOURCE;
+      sourceNote =
+        "تقویم جایگزین XOOMAR با رویدادهای زمان‌بندی‌شده از منابع BLS، BEA و Federal Reserve؛ " +
+        "به‌روزرسانی منبع: " + new Date(fallback.updatedAt).toISOString() +
+        ". Data: XOOMAR — https://xoomar.com/markets/api/calendar. " +
+        "محدودیت: این منبع تجمیعی ممکن است تغییر برنامه سازمان‌ها را با تأخیر منعکس کند.";
+    } catch (fallbackError) {
+      const fallbackDetail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+      throw new Error(
+        "Official macro calendars failed: " + officialDetail +
+        " | XOOMAR fallback failed: " + fallbackDetail,
+      );
+    }
   }
 
   const active = highImpactEventWithinBlock(events, now, 15);
@@ -353,13 +467,13 @@ export async function syncOfficialMacroCalendar(
     .filter((event) => event.at > now)
     .sort((a, b) => a.at - b.at)[0];
   const note = active
-    ? "محدوده توقف خبر: " + active.title + "؛ منبع: " + active.source
+    ? "محدوده توقف خبر: " + active.title + "؛ منبع: " + active.source + ". " +
+      sourceNote + " جهت DXY و بازده اوراق هنوز متصل نیست."
     : future
       ? "رویداد مهم بعدی: " + future.title + " در " + new Date(future.at).toISOString() +
-        "؛ تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند. جهت DXY و بازده اوراق هنوز متصل نیست."
-      : "تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند؛ رویداد زمان‌دار بعدی پیدا نشد. جهت DXY و بازده اوراق هنوز متصل نیست.";
+        ". " + sourceNote + " جهت DXY و بازده اوراق هنوز متصل نیست."
+      : sourceNote + " جهت DXY و بازده اوراق هنوز متصل نیست.";
 
-  const source = OFFICIAL_SOURCE;
   const coverageMinutes = 120 * 24 * 60;
   const highImpactEventWithinMinutes = active ? 0 : null;
   await db.prepare(
