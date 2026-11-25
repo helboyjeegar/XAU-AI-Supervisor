@@ -1,8 +1,8 @@
 # XAU AI Supervisor
 
-A signal-only XAU/USD research and risk-supervision service. The architecture is inspired by the specialist-agent workflow in [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), but this repository is an independent implementation tailored to gold and short-horizon multi-timeframe analysis.
+An XAU/USD research, risk-supervision and simulated paper-trading service. The architecture is inspired by the specialist-agent workflow in [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), but this repository is an independent implementation tailored to gold and short-horizon multi-timeframe analysis.
 
-> **Safety:** This project does not connect to a broker or place orders. A BUY/SELL result is an analytical alert only. The engine fails closed when candle data, macro context, or the daily-equity snapshot is missing or stale. Do not use it for live trading until independent backtesting, forward testing and account-specific validation are complete.
+ > **Safety:** Paper Trading is simulated only. It never connects to a broker or places orders. The SiftingIO reference price is not a broker execution quote. The engine fails closed when candle data, macro context, or the daily-equity snapshot is missing or stale. Do not use it for live trading until independent backtesting, forward testing and account-specific validation are complete.
 
 ## Current implementation (0.3.0)
 
@@ -15,6 +15,8 @@ A signal-only XAU/USD research and risk-supervision service. The architecture is
 - EMA(20/50), Wilder RSI(14), ATR(14), Keltner envelope, repeated-range tests, tick-volume comparison and rejection-wick anatomy.
 - Daily drawdown lock based on externally supplied start-of-day and current equity. The current equity must include floating PnL.
 - Telegram notifications with a 15-minute same-direction alert cooldown and `/status`, `/analyze`, `/help` commands.
+- Deterministic XAUUSD Paper Trading using the same 1m entry / 5m+30m alignment principle, fixed 0.01-lot simulation, ATR stop, 1.8R target, one open position at a time, 5% virtual daily drawdown lock, and D1 trade ledger.
+- Automatic previous-UTC-day P/L report to Telegram at 00:05 UTC; paper equity and trades are separate from the prop-account risk snapshot.
 - Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
 - Automatic event-time protection from official BLS/BEA/Federal Reserve schedules, with an attributed XOOMAR fallback when government endpoints are blocked. The fallback is limited to personal/internal use under its free terms; details and assumptions are in [docs/MACRO_CALENDAR_FA.md](docs/MACRO_CALENDAR_FA.md).
 - Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
@@ -82,7 +84,8 @@ npm run dev
 
 1. Create a Cloudflare D1 database named `xau-ai-supervisor`.
 2. Add its ID to the `DB` D1 binding in `wrangler.toml`.
-3. Apply all migrations in order: `0001_init.sql` and `0002_market_feed_state.sql` (or use `wrangler d1 migrations apply xau-ai-supervisor --remote`).
+3. Apply migrations in order, including `0003_paper_trading.sql`, before enabling the paper-trading cron.
+4. Apply all migrations in order: `0001_init.sql`, `0002_market_feed_state.sql`, and `0003_paper_trading.sql` (or use `wrangler d1 migrations apply xau-ai-supervisor --remote`).
 4. Add Worker secrets: `INGEST_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_WEBHOOK_SECRET`, and `SIFTING_API_KEY` (for the default cloud gold feed).
 5. Connect GitHub repository branch `develop` in **Workers & Pages → Create application → GitHub**. Build command: `npm install && npm run check`; deploy command: `npx wrangler deploy`.
 6. Configure Telegram's webhook URL and secret token as described in [docs/DEPLOYMENT_FA.md](docs/DEPLOYMENT_FA.md).
