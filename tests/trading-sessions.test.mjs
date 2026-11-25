@@ -44,3 +44,24 @@ test("handles daylight-saving changes through IANA time zones", () => {
 test("fails closed for invalid timestamps", () => {
   assert.equal(getTradingSessionStatus(Number.NaN).allowed, false);
 });
+
+test("session opening is inclusive and closing is exclusive", () => {
+  const londonOpen = getTradingSessionStatus(Date.parse("2026-01-05T08:00:00Z"));
+  const londonClose = getTradingSessionStatus(Date.parse("2026-01-05T17:00:00Z"));
+  const newYorkOpen = getTradingSessionStatus(Date.parse("2026-01-05T13:00:00Z"));
+  const newYorkClose = getTradingSessionStatus(Date.parse("2026-01-05T22:00:00Z"));
+  assert.ok(londonOpen.sessions.includes("LONDON"));
+  assert.ok(!londonClose.sessions.includes("LONDON"));
+  assert.ok(newYorkOpen.sessions.includes("NEW_YORK"));
+  assert.ok(!newYorkClose.sessions.includes("NEW_YORK"));
+});
+
+test("reports both sessions during their overlap", () => {
+  const status = getTradingSessionStatus(Date.parse("2026-01-05T14:00:00Z"));
+  assert.equal(status.allowed, true);
+  assert.deepEqual(status.sessions, ["LONDON", "NEW_YORK"]);
+});
+
+test("does not treat a non-finite timestamp as an open session", () => {
+  assert.equal(getTradingSessionStatus(Number.POSITIVE_INFINITY).allowed, false);
+});
