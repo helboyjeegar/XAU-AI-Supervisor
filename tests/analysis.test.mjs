@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { ema, rsiSeries, snapshot } from "../src/indicators.ts";
 import { analyzeMarket } from "../src/analysis.ts";
+import { formatAnalysis } from "../src/telegram.ts";
 
 function makeCandles(count, stepMs, start = 1_800_000_000_000, startPrice = 2000, drift = 0.15) {
   const rows = [];
@@ -96,4 +97,19 @@ test("stale macro context vetoes analysis", () => {
   });
   assert.equal(result.verdict, "NO_TRADE");
   assert.ok(result.blockers.some((item) => item.includes("زمینه کلان")));
+});
+
+test("no-trade Telegram output explains when the one-minute setup has no evidence", () => {
+  const now = 1_800_000_000_000 + 80 * 60_000;
+  const result = analyzeMarket({
+    oneMinute: makeCandles(100, 60_000, now - 99 * 60_000),
+    fiveMinute: makeCandles(100, 5 * 60_000, now - 99 * 5 * 60_000),
+    thirtyMinute: makeCandles(100, 30 * 60_000, now - 99 * 30 * 60_000),
+    risk: { verified: true, locked: false, lossPercent: 0, maxDailyLossPercent: 5 },
+    now, minRiskReward: 1.5, stopAtrMultiplier: 1.2, minScore: 75, highImpactBlockMinutes: 15,
+  });
+  const technical = result.agents.find((agent) => agent.agent === "Gold Technical Analyst");
+  assert.ok(technical?.warnings.some((item) => item.startsWith("ستاپ یک‌دقیقه‌ای شکل نگرفت")));
+  assert.ok(formatAnalysis(result).includes("وضعیت تکنیکال: ستاپ یک‌دقیقه‌ای شکل نگرفت"));
+  assert.equal(result.verdict, "NO_TRADE");
 });
