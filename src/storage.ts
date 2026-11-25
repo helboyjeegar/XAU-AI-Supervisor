@@ -36,8 +36,10 @@ export async function latestAnalysis(db: D1Database): Promise<{ payload_json: st
   return db.prepare("SELECT payload_json, created_at FROM analyses ORDER BY created_at DESC LIMIT 1").first();
 }
 
-export function tradingDayKey(timezone = "UTC", now = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+export function tradingDayKey(timezone: string, now = new Date()): string {
+  const normalizedTimezone = timezone.trim();
+  if (!normalizedTimezone) throw new RangeError("An explicit IANA timezone is required for the daily risk boundary");
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: normalizedTimezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "00";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }

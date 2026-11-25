@@ -43,3 +43,12 @@ test("status distinguishes stale risk snapshots from fresh manual snapshots", ()
   });
   assert.match(fresh, /بدون تأیید مستقل بروکر/);
 });
+
+test("unknown prop reset timezone is visibly fail-closed", () => {
+  const status = formatStatus({
+    verified: false, locked: true, lossPercent: 0, maxDailyLossPercent: 5,
+    timezoneConfigured: false,
+  });
+  assert.match(status, /منطقه زمانی ریست روزانه مشخص نشده/);
+  assert.match(status, /قفل روزانه: فعال/);
+});

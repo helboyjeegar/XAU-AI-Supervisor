@@ -15,6 +15,17 @@ const setting = (raw: string | undefined, fallback: number): number => {
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+function configuredRiskTimezone(env: Env): string | null {
+  const timezone = env.RISK_TIMEZONE?.trim();
+  if (!timezone) return null;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone });
+    return timezone;
+  } catch {
+    return null;
+  }
+}
 const asObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 function authorized(request: Request, env: Env): boolean {
@@ -52,9 +63,22 @@ function validateCandles(value: unknown): { candles?: Candle[]; error?: string }
 }
 
 async function readRisk(env: Env): Promise<RiskStatus> {
-  const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
-  if (!env.DB) return { verified: false, locked: false, lossPercent: 0, maxDailyLossPercent: setting(env.MAX_DAILY_LOSS_PERCENT, 5), dayKey };
-  return readRiskStatus(env.DB, dayKey, setting(env.MAX_DAILY_LOSS_PERCENT, 5), Date.now(), setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000);
+  const timezone = configuredRiskTimezone(env);
+  const maxDailyLossPercent = setting(env.MAX_DAILY_LOSS_PERCENT, 5);
+  if (!timezone) return {
+    verified: false, locked: true, lossPercent: 0, maxDailyLossPercent,
+    timezoneConfigured: false,
+  };
+  const dayKey = tradingDayKey(timezone);
+  if (!env.DB) return {
+    verified: false, locked: true, lossPercent: 0, maxDailyLossPercent,
+    dayKey, timezoneConfigured: true,
+  };
+  return {
+    ...await readRiskStatus(env.DB, dayKey, maxDailyLossPercent, Date.now(),
+      setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000),
+    timezoneConfigured: true,
+  };
 }
 
 async function refreshMarketData(env: Env): Promise<void> {
@@ -316,30 +340,35 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       if (!values) {
         await sendTelegram(env, "فرمت درست نیست.\nنمونه: /risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
       } else {
-        const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
-        const existing = await env.DB.prepare("SELECT day_start_equity FROM daily_risk WHERE day_key = ?").bind(dayKey).first<{ day_start_equity: number }>();
-        if (existing && Math.abs(existing.day_start_equity - values.dayStartEquity) > 0.000001) {
-          await sendTelegram(env, "مبنای Equity ابتدای روز با مقدار ثبت‌شده امروز یکسان نیست. برای جلوگیری از محاسبه اشتباه، مقدار اول را تغییر ندادم. مقدار مبنای ثبت‌شده: " + existing.day_start_equity);
+        const timezone = configuredRiskTimezone(env);
+        if (!timezone) {
+          await sendTelegram(env, "ثبت ریسک انجام نشد: منطقه زمانی ریست روزانه در قوانین پراپ مشخص نشده است. تا تعیین منطقه زمانی، قفل ورود فعال می‌ماند و هیچ snapshot بر اساس UTC فرضی ثبت نمی‌شود.");
         } else {
-          const observedAt = Date.now();
-          const risk = await saveRiskSnapshot(
-            env.DB,
-            dayKey,
-            values.dayStartEquity,
-            values.currentEquity,
-            setting(env.MAX_DAILY_LOSS_PERCENT, 5),
-            observedAt,
-            setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
-          );
-          await sendTelegram(env, [
-            "ثبت دستی وضعیت ریسک انجام شد.",
-            "Equity ابتدای روز: " + values.dayStartEquity,
-            "Equity فعلی: " + values.currentEquity,
-            "افت روزانه: " + risk.lossPercent.toFixed(2) + "% / " + risk.maxDailyLossPercent.toFixed(2) + "%",
-            "قفل روزانه: " + (risk.locked ? "فعال" : "غیرفعال"),
-            "اعتبار زمانی: حداکثر ۲ دقیقه",
-            "توجه: اعداد توسط کاربر وارد شده‌اند و مستقلاً از بروکر تأیید نشده‌اند.",
-          ].join("\n"));
+          const dayKey = tradingDayKey(timezone);
+          const existing = await env.DB.prepare("SELECT day_start_equity FROM daily_risk WHERE day_key = ?").bind(dayKey).first<{ day_start_equity: number }>();
+          if (existing && Math.abs(existing.day_start_equity - values.dayStartEquity) > 0.000001) {
+            await sendTelegram(env, "مبنای Equity ابتدای روز با مقدار ثبت‌شده امروز یکسان نیست. برای جلوگیری از محاسبه اشتباه، مقدار اول را تغییر ندادم. مقدار مبنای ثبت‌شده: " + existing.day_start_equity);
+          } else {
+            const observedAt = Date.now();
+            const risk = await saveRiskSnapshot(
+              env.DB,
+              dayKey,
+              values.dayStartEquity,
+              values.currentEquity,
+              setting(env.MAX_DAILY_LOSS_PERCENT, 5),
+              observedAt,
+              setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
+            );
+            await sendTelegram(env, [
+              "ثبت دستی وضعیت ریسک انجام شد.",
+              "Equity ابتدای روز: " + values.dayStartEquity,
+              "Equity فعلی: " + values.currentEquity,
+              "افت روزانه: " + risk.lossPercent.toFixed(2) + "% / " + risk.maxDailyLossPercent.toFixed(2) + "%",
+              "قفل روزانه: " + (risk.locked ? "فعال" : "غیرفعال"),
+              "اعتبار زمانی: حداکثر ۲ دقیقه",
+              "توجه: اعداد توسط کاربر وارد شده‌اند و مستقلاً از بروکر تأیید نشده‌اند.",
+            ].join("\n"));
+          }
         }
       }
     }
@@ -351,9 +380,11 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     const feedStatus = await formatMarketFeedStatus(env);
     const session = getTradingSessionStatus(Date.now());
     const engineStatus = env.ENABLE_TRADINGAGENTS === "true" && env.AI && env.DB
-      ? "فعال و آماده اجرا" : "غیرفعال تا تأیید سهمیه/هزینه و آماده‌سازی پایگاه داده";
+      ? "فعال؛ سقف مصرف و کنترل‌های fail-closed روشن‌اند"
+      : "غیرفعال؛ پیکربندی یا اتصال AI/D1 کامل نیست";
     await sendTelegram(env, formatStatus(risk, verdict) +
       "\nموتور TradingAgents: " + engineStatus +
+      "\nمنطقه زمانی ریست روزانه: " + (configuredRiskTimezone(env) ?? "تعیین نشده؛ قفل ورود فعال است") +
       "\nسشن مجاز: " + (session.allowed ? session.sessions.join(" + ") : "خارج از سشن") +
       "\n\n" + feedStatus);
   } else if (command === "/analyze") {
@@ -368,7 +399,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
 async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") return json({ service: "XAU AI Supervisor", version: "0.3.0", mode: "analysis-and-alerts-only", researchFramework: "TauricResearch/TradingAgents v1.0.1 Worker port", endpoints: ["GET /health", "POST /market/candles", "POST /macro/context", "POST /risk/snapshot", "POST /analysis/run", "GET /analysis/latest", "GET /research/latest", "POST /telegram/webhook"] });
-  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), marketDataConfigured: Boolean(env.SIFTING_API_KEY), marketDataProvider: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "not-configured", tradingAgentsEnabled: env.ENABLE_TRADINGAGENTS === "true", tradingAgentsReady: env.ENABLE_TRADINGAGENTS === "true" && Boolean(env.AI) && Boolean(env.DB), aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
+  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), marketDataConfigured: Boolean(env.SIFTING_API_KEY), marketDataProvider: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "not-configured", tradingAgentsEnabled: env.ENABLE_TRADINGAGENTS === "true", tradingAgentsReady: env.ENABLE_TRADINGAGENTS === "true" && Boolean(env.AI) && Boolean(env.DB) && Boolean(configuredRiskTimezone(env)), riskTimezoneConfigured: Boolean(configuredRiskTimezone(env)), aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
   if (request.method === "POST" && url.pathname === "/telegram/setup-webhook") return handleTelegramSetup(request, env);
   if (request.method === "GET" && url.pathname === "/telegram/webhook-info") return handleTelegramWebhookInfo(request, env);
   if (request.method === "POST" && url.pathname === "/telegram/webhook") return handleTelegram(request, env);
@@ -403,7 +434,9 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     let body: unknown;
     try { body = await request.json(); } catch { return json({ ok: false, error: "Request body must be JSON" }, 400); }
     if (!asObject(body) || typeof body.dayStartEquity !== "number" || typeof body.currentEquity !== "number" || !Number.isFinite(body.dayStartEquity) || !Number.isFinite(body.currentEquity) || body.dayStartEquity <= 0 || body.currentEquity <= 0 || typeof body.observedAt !== "number" || !Number.isFinite(body.observedAt) || (body.observedAt > Date.now() + 5_000 || Date.now() - body.observedAt > 120_000)) return json({ ok: false, error: "dayStartEquity, currentEquity and a fresh observedAt timestamp (Unix milliseconds) are required" }, 422);
-    const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
+    const timezone = configuredRiskTimezone(env);
+    if (!timezone) return json({ ok: false, error: "RISK_TIMEZONE must be set to the prop firm's confirmed IANA daily-reset timezone" }, 503);
+    const dayKey = tradingDayKey(timezone);
     const risk = await saveRiskSnapshot(env.DB, dayKey, body.dayStartEquity, body.currentEquity, setting(env.MAX_DAILY_LOSS_PERCENT, 5), body.observedAt, setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000);
     return json({ ok: true, risk });
   }
