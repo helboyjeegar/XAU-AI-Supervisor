@@ -435,7 +435,7 @@ export function parseShowMyTradesCalendar(raw: string, now = Date.now()): ShowMy
     if (!title) continue;
     const normalized = title.toLowerCase();
     const source: CalendarEvent["source"] =
-      /consumer price|producer price|employment situation|nonfarm|payroll|jobless claims|jolts|employment cost|productivity|real earnings|import price|export price/.test(normalized) ? "BLS" :
+      /consumer price|producer price|employment situation|nonfarm|payroll|jolts|employment cost|productivity|real earnings|import price|export price/.test(normalized) ? "BLS" :
       /gross domestic product|\bgdp\b|personal income|personal consumption|\bpce\b|trade balance/.test(normalized) ? "BEA" :
       /fomc|federal reserve|fed funds|rate decision|monetary policy/.test(normalized) ? "FOMC" : "OTHER";
     events.push({ at: ts, title, source });

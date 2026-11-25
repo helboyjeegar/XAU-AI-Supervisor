@@ -5,6 +5,7 @@ import {
   parseBlsScheduleHtml,
   parseXoomarCalendar,
   parseShowMyTradesCalendar,
+  parseShowMyTradesCalendar,
   parseBeaJson,
   parseFomcHtml,
   highImpactEventWithinBlock,
@@ -134,4 +135,32 @@ test("high-impact calendar blocks within plus or minus fifteen minutes", () => {
   assert.equal(highImpactEventWithinBlock([event], now)?.title, "CPI");
   assert.equal(highImpactEventWithinBlock([event], now + 26 * 60_000), null);
   assert.equal(highImpactEventWithinBlock([event], now + 20 * 60_000)?.title, "CPI");
+});
+
+test("ShowMyTrades fallback validates server clock, freshness and USD high-impact events", () => {
+  const payload = {
+    server_time: Math.floor(now / 1000),
+    generated_at: "2026-11-25T14:55:00.000Z",
+    events: [
+      { ts: Math.floor(Date.parse("2026-11-25T15:10:00.000Z") / 1000), time: "2026-11-25T15:10:00.000Z", currency: "USD", impact: "high", title: "Consumer Price Index", status: "scheduled", confidence: "official" },
+      { ts: Math.floor(Date.parse("2026-11-26T13:30:00.000Z") / 1000), time: "2026-11-26T13:30:00.000Z", currency: "USD", impact: "high", title: "Initial Jobless Claims", status: "scheduled", confidence: "sources_agree" },
+      { ts: Math.floor(Date.parse("2026-11-27T13:30:00.000Z") / 1000), time: "2026-11-27T13:30:00.000Z", currency: "EUR", impact: "high", title: "ECB Decision", status: "scheduled", confidence: "official" }
+    ]
+  };
+  const result = parseShowMyTradesCalendar(JSON.stringify(payload), now);
+  assert.equal(result.events.length, 2);
+  assert.equal(result.events[0].source, "BLS");
+  assert.equal(result.events[1].source, "OTHER");
+  assert.equal(result.tentativeCount, 0);
+});
+
+test("ShowMyTrades fallback rejects stale bodies, bad clocks and empty upcoming calendars", () => {
+  const base = {
+    server_time: Math.floor(now / 1000),
+    generated_at: "2026-11-25T14:55:00.000Z",
+    events: [{ ts: Math.floor(Date.parse("2026-11-26T13:30:00.000Z") / 1000), time: "2026-11-26T13:30:00.000Z", currency: "USD", impact: "high", title: "Initial Jobless Claims" }]
+  };
+  assert.throws(() => parseShowMyTradesCalendar(JSON.stringify({ ...base, generated_at: "2026-11-25T14:00:00.000Z" }), now), /older than 20 minutes/);
+  assert.throws(() => parseShowMyTradesCalendar(JSON.stringify({ ...base, server_time: Math.floor((now - 5 * 60_000) / 1000) }), now), /differs from Worker clock/);
+  assert.throws(() => parseShowMyTradesCalendar(JSON.stringify({ ...base, events: [] }), now), /no upcoming high-impact USD events/);
 });
