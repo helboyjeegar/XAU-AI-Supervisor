@@ -54,6 +54,9 @@ export interface MacroContext {
 }
 
 export interface AnalysisResult {
+  researchStatus?: "DISABLED" | "BLOCKED" | "COMPLETED" | "FAILED";
+  researchRunId?: string;
+  evidenceIds?: string[];
   aiReviewStatus?: "DISABLED" | "NOT_RUN" | "PASSED" | "VETOED" | "UNAVAILABLE";
   id: string;
   symbol: "XAUUSD";
@@ -84,6 +87,8 @@ export interface AiBinding {
 export interface Env {
   AI?: AiBinding;
   AI_MODEL?: string;
+  ENABLE_TRADINGAGENTS?: string;
+  TRADINGAGENTS_MIN_INTERVAL_MINUTES?: string;
   ENABLE_AI_REVIEW?: string;
   ALERT_COOLDOWN_MINUTES?: string;
   RISK_MAX_AGE_MINUTES?: string;
