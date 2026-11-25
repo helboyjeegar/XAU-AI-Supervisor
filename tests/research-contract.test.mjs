@@ -34,14 +34,14 @@ const reports = () => [
 ];
 
 test("accepts a complete evidence-linked bundle for coordinator synthesis only", () => {
-  const result = assessResearchBundle({ reports: reports(), evidence, evidenceScore: 80, now });
+  const result = assessResearchBundle({ reports: reports(), evidence, evidenceScore: 80, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, true);
   assert.equal(result.candidateSide, "BUY");
   assert.deepEqual(result.blockers, []);
 });
 
 test("fails closed when a specialist report is missing", () => {
-  const result = assessResearchBundle({ reports: reports().slice(0, 2), evidence, evidenceScore: 90, now });
+  const result = assessResearchBundle({ reports: reports().slice(0, 2), evidence, evidenceScore: 90, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("risk")));
 });
@@ -49,7 +49,7 @@ test("fails closed when a specialist report is missing", () => {
 test("fails closed on an unknown evidence reference", () => {
   const input = reports();
   input[1].findings[0].evidenceIds = ["e404"];
-  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now });
+  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("unknown evidence id")));
 });
@@ -59,7 +59,7 @@ test("risk veto, expired snapshot and daily lock all block coordinator synthesis
   input[2].veto = true;
   input[2].riskChecks.snapshotAgeMs = 180_000;
   input[2].riskChecks.dailyLockActive = true;
-  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now });
+  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("vetoed")));
   assert.ok(result.blockers.some((item) => item.includes("stale")));
@@ -69,7 +69,7 @@ test("risk veto, expired snapshot and daily lock all block coordinator synthesis
 test("timeframe disagreement and evidence score below 75 block", () => {
   const input = reports();
   input[1].dataQuality.timeframesAligned = false;
-  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 74, now });
+  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 74, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("5m and 30m")));
   assert.ok(result.blockers.some((item) => item.includes("minimum of 75")));
@@ -79,8 +79,14 @@ test("stale specialist reports and unreferenced findings block", () => {
   const input = reports();
   input[0].generatedAt = now - 5 * 60_000;
   input[1].findings[0].evidenceIds = [];
-  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now });
+  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 90, now, sessionAllowed: true });
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("stale")));
   assert.ok(result.blockers.some((item) => item.includes("without evidence")));
+});
+
+test("fails closed outside London and New York sessions", () => {
+  const result = assessResearchBundle({ reports: reports(), evidence, evidenceScore: 90, now, sessionAllowed: false });
+  assert.equal(result.eligibleForCoordinatorDecision, false);
+  assert.ok(result.blockers.some((item) => item.includes("Outside the allowed London/New York")));
 });
