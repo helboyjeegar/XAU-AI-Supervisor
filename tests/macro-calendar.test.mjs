@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parseBlsIcs,
+  parseBlsScheduleHtml,
   parseBeaJson,
   parseFomcHtml,
   highImpactEventWithinBlock,
@@ -26,6 +27,35 @@ test("BLS iCalendar parses Eastern release times into UTC", () => {
   assert.equal(events.length, 2);
   assert.equal(events[0].at, Date.parse("2026-12-10T13:30:00.000Z"));
   assert.equal(events[1].source, "BLS");
+});
+
+
+test("BLS official annual HTML schedule parses only fresh PFEI releases as Eastern time", () => {
+  const html = [
+    "<h1>Schedule of Selected Releases</h1>",
+    "<table>",
+    "<tr><td>Friday, December 04, 2026</td><td>08:30 AM</td><td>Employment Situation for November 2026</td></tr>",
+    "<tr><td>Thursday, December 10, 2026</td><td>08:30 AM</td><td>Consumer Price Index for November 2026</td></tr>",
+    "<tr><td>Friday, December 11, 2026</td><td>08:30 AM</td><td>Real Earnings for November 2026</td></tr>",
+    "<tr><td>Tuesday, December 15, 2026</td><td>08:30 AM</td><td>Producer Price Index for November 2026</td></tr>",
+    "</table>",
+    "<p>NOTE: All times on calendar are Eastern Time. Last Modified Date: November 09, 2026</p>",
+  ].join("");
+  const events = parseBlsScheduleHtml(html, now);
+  assert.equal(events.length, 4);
+  assert.equal(events[0].at, Date.parse("2026-12-04T13:30:00.000Z"));
+  assert.equal(events[1].at, Date.parse("2026-12-10T13:30:00.000Z"));
+  assert.ok(events.some((event) => event.title.startsWith("Real Earnings")));
+  assert.ok(events.some((event) => event.title.startsWith("Producer Price Index")));
+});
+
+test("BLS annual HTML schedule rejects stale official pages", () => {
+  const stale = [
+    "<h1>Schedule of Releases</h1>",
+    "<tr><td>Friday, December 04, 2026</td><td>08:30 AM</td><td>Employment Situation</td></tr>",
+    "<p>Last Modified Date: October 01, 2026</p>",
+  ].join("");
+  assert.throws(() => parseBlsScheduleHtml(stale, now), /maximum age 45 days/);
 });
 
 test("BEA release JSON accepts fresh GDP and PCE schedule entries", () => {
