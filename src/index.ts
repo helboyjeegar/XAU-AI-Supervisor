@@ -3,7 +3,7 @@ import { runTradingAgentsResearch } from "./tradingagents-engine.ts";
 import { saveResearchRun, latestResearchRun, deleteOldResearchRuns } from "./research-storage.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { refreshSiftingMarketData } from "./market-feed.ts";
-import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
+import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, reserveAiRunBudget, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import type { AnalysisResult, Candle, Env, MacroContext, RiskStatus, Timeframe } from "./types.ts";
 
@@ -185,7 +185,10 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
     riskMaxAgeMs: setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
     marketDataSource: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "D1 candle store; provider not recorded",
-  }, env.AI, env.ENABLE_TRADINGAGENTS === "true");
+  }, env.AI, env.ENABLE_TRADINGAGENTS === "true", () => reserveAiRunBudget(
+    env.DB!, tradingDayKey("UTC", new Date(now)),
+    setting(env.TRADINGAGENTS_MAX_RUNS_PER_UTC_DAY, 8), now,
+  ));
   if (execution.result.researchStatus !== "DISABLED") {
     await saveResearchRun(env.DB, {
       runId: execution.runId, createdAt: execution.result.generatedAt,
@@ -438,6 +441,7 @@ export default {
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
           await deleteOldResearchRuns(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
+          await env.DB!.prepare("DELETE FROM ai_daily_budget WHERE day_key < date('now', '-30 days')").run();
         } else {
           if (!getTradingSessionStatus(Date.now()).allowed) return;
           await refreshMarketData(env);
