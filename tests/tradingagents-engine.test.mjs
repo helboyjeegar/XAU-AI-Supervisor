@@ -91,6 +91,22 @@ test("does not call inference when the TradingAgents engine is disabled", async 
   assert.equal(calls, 0);
 });
 
+test("disabled engine reports deterministic preflight blockers without inference", async () => {
+  let calls = 0;
+  const ai = { async run() { calls++; throw new Error("must not be called"); } };
+  const run = await runTradingAgentsResearch(input({
+    risk: { verified: false, locked: false, lossPercent: 0, maxDailyLossPercent: 5, updatedAt: now - 300_000 },
+    macro: { source: "old-calendar", asOf: now - 60 * 60_000, calendarCoverageMinutes: 180,
+      highImpactEventWithinMinutes: null },
+  }), ai, false);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "DISABLED");
+  assert.ok(run.result.blockers.some((item) => item.includes("تقویم اقتصادی")));
+  assert.ok(run.result.blockers.some((item) => item.includes("snapshot ریسک")));
+  assert.ok(run.result.blockers.some((item) => item.includes("موتور TradingAgents غیرفعال")));
+  assert.equal(calls, 0);
+});
+
 test("stale risk or macro preflight blocks the run before any inference", async () => {
   const { ai, calls } = mockAi();
   const run = await runTradingAgentsResearch(input({
