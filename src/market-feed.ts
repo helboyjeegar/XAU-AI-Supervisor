@@ -3,7 +3,7 @@ import type { Candle, Timeframe } from "./types.ts";
 
 const API_BASE = "https://api.sifting.io/v1/hist/commodities/XAUUSD/bars";
 const PROVIDER = "siftingio";
-const FETCH_INTERVAL_MS = 4 * 60_000;
+const FETCH_INTERVAL_MS = 5 * 60_000;
 const MAX_AS_OF_AGE_MS = 5 * 60_000;
 const MAX_BAR_AGE_MS = 3 * 60_000;
 const M1_MS = 60_000;
