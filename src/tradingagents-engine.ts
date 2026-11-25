@@ -209,7 +209,7 @@ export async function runTradingAgentsResearch(
   const runId = crypto.randomUUID(), checks = inspect(input), evidence = evidenceFor(runId, input, checks);
   const commonWarnings = [...checks.warnings, "snapshot حساب از منبع ثبت‌شده خوانده می‌شود و به معنی تأیید مستقل بروکر نیست."];
   if (!enabled) return noTrade(runId, input.now,
-    ["موتور TradingAgents غیرفعال است تا سهمیه و احتمال هزینه Workers AI تأیید شود."],
+    [...checks.blockers, "موتور TradingAgents غیرفعال است تا سهمیه و احتمال هزینه Workers AI تأیید شود."],
     commonWarnings, evidence, [], "DISABLED", checks);
   if (checks.blockers.length) return noTrade(runId, input.now, checks.blockers,
     commonWarnings, evidence, [], "BLOCKED", checks);
