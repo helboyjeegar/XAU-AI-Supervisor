@@ -183,10 +183,21 @@ function noTrade(runId: string, now: number, blockers: string[], warnings: strin
     timeframes: checks.snapshots,
   }};
 }
+const MAX_AI_INPUT_CHARACTERS = 20_000;
+
+function assertAiInputWithinLimit(system: string, role: string, data: unknown): string {
+  const userContent = JSON.stringify({ role, suppliedEvidence: data });
+  if (system.length + userContent.length > MAX_AI_INPUT_CHARACTERS) {
+    throw new Error("AI input exceeds the per-call free-tier safety limit; no inference was submitted");
+  }
+  return userContent;
+}
+
 async function invoke(ai: AiBinding, model: string, role: string, system: string, data: unknown, maxTokens: number): Promise<unknown> {
+  const userContent = assertAiInputWithinLimit(system, role, data);
   return ai.run(model, { temperature: 0, max_tokens: maxTokens, messages: [
     { role: "system", content: system },
-    { role: "user", content: JSON.stringify({ role, suppliedEvidence: data }) },
+    { role: "user", content: userContent },
   ] });
 }
 function prompt(agent: SpecialistName): string {
@@ -242,6 +253,9 @@ export async function runTradingAgentsResearch(
     unavailable: [...(input.macro?.dxyTrend ? [] : ["DXY"]), ...(input.macro?.us10yTrend ? [] : ["US10Y"])] };
   let reports: SpecialistReport[] = [];
   try {
+    // Validate the complete parallel stage before starting either paid inference.
+    assertAiInputWithinLimit(prompt("macro"), "macro", macroFacts);
+    assertAiInputWithinLimit(prompt("quant"), "quant", marketFacts);
     const [macroRaw, quantRaw] = await Promise.all([
       invoke(ai, model, "macro", prompt("macro"), macroFacts, 400),
       invoke(ai, model, "quant", prompt("quant"), marketFacts, 500),

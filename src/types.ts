@@ -41,6 +41,7 @@ export interface RiskStatus {
   maxDailyLossPercent: number;
   dayKey?: string;
   updatedAt?: number;
+  timezoneConfigured?: boolean;
 }
 
 export interface MacroContext {
