@@ -184,7 +184,7 @@ export async function refreshSiftingMarketData(
       latestCandleTime(db, "30m"),
     ]);
 
-    const endMs = Math.floor(now / M1_MS) * M1_MS - 1;
+    const endMs = Math.floor(now / M1_MS) * M1_MS - M1_MS;
     const initialStartMs = endMs - (REQUEST_BAR_LIMIT - 1) * M1_MS;
     const startMs = lastM1 === null
       ? initialStartMs
