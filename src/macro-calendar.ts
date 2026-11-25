@@ -13,6 +13,15 @@ const OFFICIAL_SOURCE = "official-us-macro-calendar-v1";
 const REFRESH_INTERVAL_MS = 15 * 60_000;
 const MAX_SOURCE_AGE_MS = 60 * 24 * 60 * 60_000;
 const LOOKAHEAD_MS = 120 * 24 * 60 * 60_000;
+const MAX_BLS_SCHEDULE_AGE_MS = 45 * 24 * 60 * 60_000;
+
+const MONTH_NUMBERS: Record<string, number> = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+};
+
+const BLS_PFEI_PATTERN =
+  /consumer price index|producer price index|employment situation|employment cost index|productivity and costs|real earnings|u\.s\. (?:import and export|export and import) price indexes/i;
 
 function decodeIcsText(value: string): string {
   return value
@@ -62,7 +71,7 @@ function localTimeToUtc(
 
 function parseIcsDate(property: string, value: string): number | null {
   const raw = value.trim();
-  if (/^\d{8}$/.test(raw)) return null; // All-day event; no release time to protect.
+  if (/^\d{8}$/.test(raw)) return null;
   const match = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/i);
   if (!match) return null;
 
@@ -96,8 +105,7 @@ export function parseBlsIcs(ics: string): CalendarEvent[] {
         const startColon = startLine.indexOf(":");
         if (colon > 0 && startColon > 0) {
           const title = decodeIcsText(summaryLine.slice(colon + 1));
-          const important = /consumer price index|\bCPI\b|producer price index|\bPPI\b|employment situation|nonfarm payroll|payroll employment/i.test(title);
-          if (important) {
+          if (BLS_PFEI_PATTERN.test(title)) {
             const at = parseIcsDate(startLine.slice(0, startColon), startLine.slice(startColon + 1));
             if (at !== null) events.push({ at, title, source: "BLS" });
           }
@@ -109,23 +117,15 @@ export function parseBlsIcs(ics: string): CalendarEvent[] {
     if (block) block.push(line);
   }
 
-  if (events.length === 0) throw new Error("BLS feed contains no timed CPI, PPI or Employment Situation events");
+  if (events.length === 0) throw new Error("BLS feed contains no timed Principal Federal Economic Indicator events");
   return events;
 }
-
-const BLS_PFEI_PATTERN =
-  /consumer price index|producer price index|employment situation|employment cost index|productivity and costs|real earnings|u\.s\. (?:import and export|export and import) price indexes/i;
-
-const MONTH_NUMBERS: Record<string, number> = {
-  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
-  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
-};
 
 function cleanHtmlText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<\/(?:tr|p|div|li|h[1-6])\s*>/gi, "\\n")
+    .replace(/<\/(?:tr|p|div|li|h[1-6])\s*>/gi, "\n")
     .replace(/<\/(?:td|th)\s*>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;|&#160;|&#xA0;/gi, " ")
@@ -146,133 +146,19 @@ export function parseBlsScheduleHtml(html: string, now = Date.now()): CalendarEv
   const lastModifiedDates = [...text.matchAll(/Last Modified Date:\s*([A-Za-z]+\s+\d{1,2},\s+20\d{2})/gi)]
     .map((match) => Date.parse(match[1]!));
   const latestModified = lastModifiedDates.filter(Number.isFinite).sort((a, b) => b - a)[0];
-  if (!latestModified || latestModified > now + 24 * 60 * 60_000 || now - latestModified > 45 * 24 * 60 * 60_000) {
+  if (
+    !latestModified ||
+    latestModified > now + 24 * 60 * 60_000 ||
+    now - latestModified > MAX_BLS_SCHEDULE_AGE_MS
+  ) {
     throw new Error("BLS annual schedule has no recent Last Modified Date (maximum age 45 days)");
   }
 
-  const weekday = "(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)";
-  const rowPattern = new RegExp(
-    `^${weekday},\\s+([A-Za-z]+)\\s+(\\d{1,2}),\\s+(20\\d{2})\\s+(\\d{1,2}):(\\d{2})\\s+(AM|PM)\\s+(.+)import type { MacroContext } from "./types.ts";
-
-export interface CalendarEvent {
-  at: number;
-  title: string;
-  source: "BLS" | "BEA" | "FOMC";
-}
-
-const BLS_URL = "https://www.bls.gov/schedule/news_release/bls.ics";
-const BEA_URL = "https://apps.bea.gov/API/signup/release_dates.json";
-const FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm";
-const OFFICIAL_SOURCE = "official-us-macro-calendar-v1";
-const REFRESH_INTERVAL_MS = 15 * 60_000;
-const MAX_SOURCE_AGE_MS = 60 * 24 * 60 * 60_000;
-const LOOKAHEAD_MS = 120 * 24 * 60 * 60_000;
-
-function decodeIcsText(value: string): string {
-  return value
-    .replace(/\\n/gi, " ")
-    .replace(/\\,/g, ",")
-    .replace(/\\;/g, ";")
-    .replace(/\\\\/g, "\\")
-    .trim();
-}
-
-function localTimeToUtc(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  timeZone: string,
-): number | null {
-  try {
-    const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(new Date(localAsUtc));
-    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
-    const representedAsUtc = Date.UTC(
-      get("year"),
-      get("month") - 1,
-      get("day"),
-      get("hour"),
-      get("minute"),
-      get("second"),
-    );
-    const result = localAsUtc - (representedAsUtc - localAsUtc);
-    return Number.isFinite(result) ? result : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseIcsDate(property: string, value: string): number | null {
-  const raw = value.trim();
-  if (/^\d{8}$/.test(raw)) return null; // All-day event; no release time to protect.
-  const match = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/i);
-  if (!match) return null;
-
-  const [, y, mo, d, h, mi, sec = "0", z] = match;
-  const parts = [y, mo, d, h, mi, sec].map(Number);
-  if (parts.some((part) => !Number.isFinite(part))) return null;
-  if (z) return Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]);
-
-  const tzid = property.match(/(?:^|;)TZID=([^;:]+)/i)?.[1] ?? "America/New_York";
-  return localTimeToUtc(parts[0], parts[1], parts[2], parts[3], parts[4], parts[5], tzid);
-}
-
-export function parseBlsIcs(ics: string): CalendarEvent[] {
-  if (!ics.includes("BEGIN:VCALENDAR") || !ics.includes("BEGIN:VEVENT")) {
-    throw new Error("BLS calendar is not a valid iCalendar feed");
-  }
-  const lines = ics.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
-  const events: CalendarEvent[] = [];
-  let block: string[] | null = null;
-
-  for (const line of lines) {
-    if (line === "BEGIN:VEVENT") {
-      block = [];
-      continue;
-    }
-    if (line === "END:VEVENT" && block) {
-      const summaryLine = block.find((item) => item.toUpperCase().startsWith("SUMMARY"));
-      const startLine = block.find((item) => item.toUpperCase().startsWith("DTSTART"));
-      if (summaryLine && startLine) {
-        const colon = summaryLine.indexOf(":");
-        const startColon = startLine.indexOf(":");
-        if (colon > 0 && startColon > 0) {
-          const title = decodeIcsText(summaryLine.slice(colon + 1));
-          const important = /consumer price index|\bCPI\b|producer price index|\bPPI\b|employment situation|nonfarm payroll|payroll employment/i.test(title);
-          if (important) {
-            const at = parseIcsDate(startLine.slice(0, startColon), startLine.slice(startColon + 1));
-            if (at !== null) events.push({ at, title, source: "BLS" });
-          }
-        }
-      }
-      block = null;
-      continue;
-    }
-    if (block) block.push(line);
-  }
-
-  if (events.length === 0) throw new Error("BLS feed contains no timed CPI, PPI or Employment Situation events");
-  return events;
-}
-
-,
-    "i",
-  );
+  const rowPattern =
+    /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+([A-Za-z]+)\s+(\d{1,2}),\s+(20\d{2})\s+(\d{1,2}):(\d{2})\s+(AM|PM)\s+(.+)$/i;
   const events: CalendarEvent[] = [];
 
-  for (const line of text.split("\\n")) {
+  for (const line of text.split("\n")) {
     const match = line.trim().match(rowPattern);
     if (!match) continue;
 
@@ -282,7 +168,7 @@ export function parseBlsIcs(ics: string): CalendarEvent[] {
     let hour = Number(match[4]);
     const minute = Number(match[5]);
     const meridiem = match[6]!.toUpperCase();
-    const title = match[7]!.trim().replace(/\\s+/g, " ");
+    const title = match[7]!.trim().replace(/\s+/g, " ");
 
     if (!month || !Number.isInteger(day) || !Number.isInteger(year) || !BLS_PFEI_PATTERN.test(title)) continue;
     if (meridiem === "AM" && hour === 12) hour = 0;
@@ -298,6 +184,31 @@ export function parseBlsIcs(ics: string): CalendarEvent[] {
   return events;
 }
 
+async function fetchText(url: string, accept: string): Promise<string> {
+  const host = new URL(url).hostname;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        accept,
+        "cache-control": "no-cache",
+        "user-agent": "XAU-AI-Supervisor/0.3 (+https://github.com/helboyjeegar/XAU-AI-Supervisor)",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.name + ": " + error.message : String(error);
+    throw new Error("Calendar network request failed for " + host + ": " + detail);
+  }
+  if (!response.ok) {
+    throw new Error(
+      "Calendar HTTP " + response.status + " from " + host +
+      "; content-type=" + (response.headers.get("content-type") ?? "unknown"),
+    );
+  }
+  return response.text();
+}
+
 async function fetchBlsEvents(now: number): Promise<CalendarEvent[]> {
   const year = new Date(now).getUTCFullYear();
   const failures: string[] = [];
@@ -311,7 +222,7 @@ async function fetchBlsEvents(now: number): Promise<CalendarEvent[]> {
 
   const years = [year, year + 1];
   const pages = await Promise.all(years.map(async (calendarYear) => {
-    const url = `https://www.bls.gov/schedule/${calendarYear}/home.htm`;
+    const url = "https://www.bls.gov/schedule/" + calendarYear + "/home.htm";
     try {
       const html = await fetchText(url, "text/html");
       return parseBlsScheduleHtml(html, now);
@@ -323,7 +234,7 @@ async function fetchBlsEvents(now: number): Promise<CalendarEvent[]> {
 
   const events = pages.flat();
   if (events.length === 0) {
-    throw new Error(`All official BLS calendar endpoints failed: ${failures.join(" | ")}`);
+    throw new Error("All official BLS calendar endpoints failed: " + failures.join(" | "));
   }
   return events;
 }
@@ -352,7 +263,7 @@ export function parseBeaJson(raw: string, now = Date.now()): CalendarEvent[] {
   }
 
   const unique = new Map<string, CalendarEvent>();
-  for (const event of events) unique.set(`${event.at}:${event.title}`, event);
+  for (const event of events) unique.set(String(event.at) + ":" + event.title, event);
   if (![...unique.values()].some((event) => event.title.toLowerCase().includes("gross domestic product") && event.at > now && event.at <= now + LOOKAHEAD_MS)) {
     throw new Error("BEA feed has no upcoming GDP release in the coverage window");
   }
@@ -373,10 +284,6 @@ export function parseFomcHtml(html: string, now = Date.now()): CalendarEvent[] {
     .replace(/\s+/g, " ");
 
   const headings = [...text.matchAll(/(20\d{2})\s+FOMC Meetings/gi)];
-  const months: Record<string, number> = {
-    january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
-    july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
-  };
   const events: CalendarEvent[] = [];
 
   for (let i = 0; i < headings.length; i++) {
@@ -386,16 +293,18 @@ export function parseFomcHtml(html: string, now = Date.now()): CalendarEvent[] {
     const end = i + 1 < headings.length ? headings[i + 1]!.index! : text.length;
     const section = text.slice(start, end);
     const pattern = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})\s*[-–]\s*(\d{1,2})\b/gi;
+
     for (const match of section.matchAll(pattern)) {
-      const month = months[match[1]!.toLowerCase()];
+      const month = MONTH_NUMBERS[match[1]!.toLowerCase()];
       const statementDay = Number(match[3]);
-      // The FOMC statement is normally released at 2:00 PM Eastern; the press
-      // conference is normally scheduled for 2:30 PM Eastern. The source page
-      // supplies meeting dates, while these standard release times are assumptions.
       const statement = localTimeToUtc(year, month, statementDay, 14, 0, 0, "America/New_York");
       const pressConference = localTimeToUtc(year, month, statementDay, 14, 30, 0, "America/New_York");
-      if (statement !== null) events.push({ at: statement, title: "FOMC policy statement (scheduled-time assumption)", source: "FOMC" });
-      if (pressConference !== null) events.push({ at: pressConference, title: "FOMC press conference (scheduled-time assumption)", source: "FOMC" });
+      if (statement !== null) {
+        events.push({ at: statement, title: "FOMC policy statement (scheduled-time assumption)", source: "FOMC" });
+      }
+      if (pressConference !== null) {
+        events.push({ at: pressConference, title: "FOMC press conference (scheduled-time assumption)", source: "FOMC" });
+      }
     }
   }
 
@@ -412,30 +321,14 @@ export function highImpactEventWithinBlock(events: CalendarEvent[], now: number,
     .sort((a, b) => Math.abs(a.at - now) - Math.abs(b.at - now))[0] ?? null;
 }
 
-async function fetchText(url: string, accept: string): Promise<string> {
-  const host = new URL(url).hostname;
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      headers: {
-        accept,
-        "cache-control": "no-cache",
-        "user-agent": "XAU-AI-Supervisor/0.3 (+https://github.com/helboyjeegar/XAU-AI-Supervisor)",
-      },
-      signal: AbortSignal.timeout(12_000),
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    throw new Error(`Calendar network request failed for ${host}: ${detail}`);
+export async function syncOfficialMacroCalendar(
+  db: D1Database,
+  current: MacroContext | undefined,
+  now = Date.now(),
+): Promise<boolean> {
+  if (current?.source === OFFICIAL_SOURCE && current.asOf && now - current.asOf < REFRESH_INTERVAL_MS) {
+    return false;
   }
-  if (!response.ok) {
-    throw new Error(`Calendar HTTP ${response.status} from ${host}; content-type=${response.headers.get("content-type") ?? "unknown"}`);
-  }
-  return response.text();
-}
-
-export async function syncOfficialMacroCalendar(db: D1Database, current: MacroContext | undefined, now = Date.now()): Promise<boolean> {
-  if (current?.source === OFFICIAL_SOURCE && current.asOf && now - current.asOf < REFRESH_INTERVAL_MS) return false;
 
   const [blsEvents, beaRaw, fomcRaw] = await Promise.all([
     fetchBlsEvents(now),
@@ -449,32 +342,32 @@ export async function syncOfficialMacroCalendar(db: D1Database, current: MacroCo
     ...parseFomcHtml(fomcRaw, now),
   ];
   const futureBls = events.filter((event) => event.source === "BLS" && event.at > now && event.at <= now + LOOKAHEAD_MS);
-  if (futureBls.length === 0) throw new Error("BLS feed has no upcoming high-impact release in the coverage window");
+  if (futureBls.length === 0) {
+    throw new Error("BLS calendar has no upcoming high-impact release in the coverage window");
+  }
 
   const active = highImpactEventWithinBlock(events, now, 15);
   const future = events
     .filter((event) => event.at > now)
     .sort((a, b) => a.at - b.at)[0];
   const note = active
-    ? `محدوده توقف خبر: ${active.title}؛ منبع: ${active.source}`
+    ? "محدوده توقف خبر: " + active.title + "؛ منبع: " + active.source
     : future
-      ? `رویداد مهم بعدی: ${future.title} در ${new Date(future.at).toISOString()}؛ تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند. جهت DXY و بازده اوراق هنوز متصل نیست.`
+      ? "رویداد مهم بعدی: " + future.title + " در " + new Date(future.at).toISOString() +
+        "؛ تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند. جهت DXY و بازده اوراق هنوز متصل نیست."
       : "تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند؛ رویداد زمان‌دار بعدی پیدا نشد. جهت DXY و بازده اوراق هنوز متصل نیست.";
 
   const source = OFFICIAL_SOURCE;
   const coverageMinutes = 7 * 24 * 60;
   const highImpactEventWithinMinutes = active ? 0 : null;
   await db.prepare(
-    `INSERT INTO macro_context (id, as_of, source, calendar_coverage_minutes, high_impact_event_within_minutes, dxy_trend, us10y_trend, note)
-     VALUES (1, ?, ?, ?, ?, NULL, NULL, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       as_of=excluded.as_of,
-       source=excluded.source,
-       calendar_coverage_minutes=excluded.calendar_coverage_minutes,
-       high_impact_event_within_minutes=excluded.high_impact_event_within_minutes,
-       dxy_trend=NULL,
-       us10y_trend=NULL,
-       note=excluded.note`
+    "INSERT INTO macro_context (id, as_of, source, calendar_coverage_minutes, high_impact_event_within_minutes, dxy_trend, us10y_trend, note) " +
+    "VALUES (1, ?, ?, ?, ?, NULL, NULL, ?) " +
+    "ON CONFLICT(id) DO UPDATE SET " +
+    "as_of=excluded.as_of, source=excluded.source, " +
+    "calendar_coverage_minutes=excluded.calendar_coverage_minutes, " +
+    "high_impact_event_within_minutes=excluded.high_impact_event_within_minutes, " +
+    "dxy_trend=NULL, us10y_trend=NULL, note=excluded.note",
   ).bind(now, source, coverageMinutes, highImpactEventWithinMinutes, note).run();
 
   return true;
