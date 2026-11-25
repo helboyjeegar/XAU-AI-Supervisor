@@ -35,11 +35,13 @@ export function formatAnalysis(result: AnalysisResult): string {
 }
 
 export function formatStatus(risk: RiskStatus, lastVerdict?: string): string {
-  const riskLabel = risk.verified && risk.updatedAt !== undefined
-    ? "snapshot تازه است؛ ورودی دستی/خارجی و بدون تأیید مستقل بروکر"
-    : risk.updatedAt !== undefined
-      ? "snapshot قدیمی یا نامعتبر است؛ ثبت مجدد لازم است"
-      : "snapshot ثبت نشده است";
+  const riskLabel = risk.timezoneConfigured === false
+    ? "منطقه زمانی ریست روزانه مشخص نشده؛ بررسی ریسک نامعتبر است"
+    : risk.verified && risk.updatedAt !== undefined
+      ? "snapshot تازه است؛ ورودی دستی/خارجی و بدون تأیید مستقل بروکر"
+      : risk.updatedAt !== undefined
+        ? "snapshot قدیمی یا نامعتبر است؛ ثبت مجدد لازم است"
+        : "snapshot ثبت نشده است";
   return [
     "وضعیت XAU AI SUPERVISOR",
     `وضعیت ریسک: ${riskLabel}`,
