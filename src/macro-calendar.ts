@@ -13,7 +13,6 @@ const OFFICIAL_SOURCE = "official-us-macro-calendar-v1";
 const REFRESH_INTERVAL_MS = 15 * 60_000;
 const MAX_SOURCE_AGE_MS = 60 * 24 * 60 * 60_000;
 const LOOKAHEAD_MS = 120 * 24 * 60 * 60_000;
-const EVENT_BLOCK_MS = 15 * 60_000;
 
 function decodeIcsText(value: string): string {
   return value
@@ -231,8 +230,8 @@ export async function syncOfficialMacroCalendar(db: D1Database, current: MacroCo
   const note = active
     ? `محدوده توقف خبر: ${active.title}؛ منبع: ${active.source}`
     : future
-      ? `رویداد مهم بعدی: ${future.title} در ${new Date(future.at).toISOString()}؛ تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند.`
-      : "تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند؛ رویداد زمان‌دار بعدی پیدا نشد.";
+      ? `رویداد مهم بعدی: ${future.title} در ${new Date(future.at).toISOString()}؛ تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند. جهت DXY و بازده اوراق هنوز متصل نیست.`
+      : "تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند؛ رویداد زمان‌دار بعدی پیدا نشد. جهت DXY و بازده اوراق هنوز متصل نیست.";
 
   const source = OFFICIAL_SOURCE;
   const coverageMinutes = 7 * 24 * 60;
