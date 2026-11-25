@@ -101,10 +101,13 @@ test("stale macro context vetoes analysis", () => {
 
 test("no-trade Telegram output explains when the one-minute setup has no evidence", () => {
   const now = 1_800_000_000_000 + 80 * 60_000;
+  const flatCandles = (count, stepMs, start) => Array.from({ length: count }, (_, i) => ({
+    time: start + i * stepMs, open: 2000, high: 2000.1, low: 1999.9, close: 2000, volume: 100,
+  }));
   const result = analyzeMarket({
-    oneMinute: makeCandles(100, 60_000, now - 99 * 60_000),
-    fiveMinute: makeCandles(100, 5 * 60_000, now - 99 * 5 * 60_000),
-    thirtyMinute: makeCandles(100, 30 * 60_000, now - 99 * 30 * 60_000),
+    oneMinute: flatCandles(100, 60_000, now - 99 * 60_000),
+    fiveMinute: flatCandles(100, 5 * 60_000, now - 99 * 5 * 60_000),
+    thirtyMinute: flatCandles(100, 30 * 60_000, now - 99 * 30 * 60_000),
     risk: { verified: true, locked: false, lossPercent: 0, maxDailyLossPercent: 5 },
     now, minRiskReward: 1.5, stopAtrMultiplier: 1.2, minScore: 75, highImpactBlockMinutes: 15,
   });
