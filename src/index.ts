@@ -113,13 +113,26 @@ async function formatMarketFeedStatus(env: Env): Promise<string> {
 
 async function refreshMacroCalendar(env: Env): Promise<void> {
   if (!env.DB) return;
+  const now = Date.now();
   try {
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO macro_sync_state (id, last_attempt_at, retry_after_at, last_error) VALUES (1, 0, 0, NULL)",
+    ).run();
+    const reservation = await env.DB.prepare(
+      "UPDATE macro_sync_state SET last_attempt_at = ?, retry_after_at = ? WHERE id = 1 AND retry_after_at <= ?",
+    ).bind(now, now + 15 * 60_000, now).run();
+    if ((reservation.meta?.changes ?? 0) === 0) return;
+
     const current = await latestMacroContext(env.DB);
-    await syncOfficialMacroCalendar(env.DB, current, Date.now());
+    await syncOfficialMacroCalendar(env.DB, current, now);
+    await env.DB.prepare("UPDATE macro_sync_state SET last_error = NULL WHERE id = 1").run();
   } catch (error) {
-    // Do not replace a previously valid calendar snapshot with partial or failed data.
-    // Once the stored snapshot becomes stale, the analysis pipeline fails closed.
-    console.error("Official macro calendar refresh failed:", error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await env.DB.prepare("UPDATE macro_sync_state SET last_error = ? WHERE id = 1").bind(message.slice(0, 500)).run();
+    } catch { /* keep the original calendar error */ }
+    // Keep the previous valid snapshot; retry is throttled for 15 minutes.
+    console.error("Official macro calendar refresh failed:", message);
   }
 }
 
