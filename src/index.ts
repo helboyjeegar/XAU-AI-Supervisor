@@ -328,7 +328,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const command = messageText.split(/\s+/, 1)[0].split("@", 1)[0];
   if (!env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return json({ ok: true, ignored: true });
   if (command === "/help" || command === "/start") {
-    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
   } else if (command === "/test") {
     const sent = await sendTelegram(env, "آزمایش تلگرام: پیام فرمان دریافت شد و ارسال پاسخ از Worker انجام شد. هیچ تحلیلی یا سفارشی اجرا نشده است.");
     if (!sent) console.error("Telegram test reply could not be sent");
@@ -338,7 +338,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     } else {
       const values = parseRiskCommand(messageText);
       if (!values) {
-        await sendTelegram(env, "فرمت درست نیست.\nنمونه: /risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
+        await sendTelegram(env, "فرمت درست نیست.\nنمونه: /risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
       } else {
         const timezone = configuredRiskTimezone(env);
         if (!timezone) {
@@ -347,7 +347,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
           const dayKey = tradingDayKey(timezone);
           const existing = await env.DB.prepare("SELECT day_start_equity FROM daily_risk WHERE day_key = ?").bind(dayKey).first<{ day_start_equity: number }>();
           if (existing && Math.abs(existing.day_start_equity - values.dayStartEquity) > 0.000001) {
-            await sendTelegram(env, "مبنای Equity ابتدای روز با مقدار ثبت‌شده امروز یکسان نیست. برای جلوگیری از محاسبه اشتباه، مقدار اول را تغییر ندادم. مقدار مبنای ثبت‌شده: " + existing.day_start_equity);
+            await sendTelegram(env, "Balance ابتدای روز با مقدار ثبت‌شده امروز یکسان نیست. برای جلوگیری از محاسبه اشتباه، مقدار اول را تغییر ندادم. Balance مبنا: " + existing.day_start_equity);
           } else {
             const observedAt = Date.now();
             const risk = await saveRiskSnapshot(
@@ -361,7 +361,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
             );
             await sendTelegram(env, [
               "ثبت دستی وضعیت ریسک انجام شد.",
-              "Equity ابتدای روز: " + values.dayStartEquity,
+              "Balance ابتدای روز: " + values.dayStartEquity,
               "Equity فعلی: " + values.currentEquity,
               "افت روزانه: " + risk.lossPercent.toFixed(2) + "% / " + risk.maxDailyLossPercent.toFixed(2) + "%",
               "قفل روزانه: " + (risk.locked ? "فعال" : "غیرفعال"),
