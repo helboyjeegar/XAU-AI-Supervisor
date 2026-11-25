@@ -63,7 +63,7 @@ async function refreshMacroCalendar(env: Env): Promise<void> {
   } catch (error) {
     // Do not replace a previously valid calendar snapshot with partial or failed data.
     // Once the stored snapshot becomes stale, the analysis pipeline fails closed.
-    console.error("Official macro calendar refresh failed", error);
+    console.error("Official macro calendar refresh failed:", error instanceof Error ? error.message : String(error));
   }
 }
 
