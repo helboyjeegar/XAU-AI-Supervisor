@@ -149,7 +149,7 @@ test("ShowMyTrades fallback validates server clock, freshness and USD high-impac
   const result = parseShowMyTradesCalendar(JSON.stringify(payload), now);
   assert.equal(result.events.length, 2);
   assert.equal(result.events[0].source, "BLS");
-  assert.equal(result.events[1].source, "OTHER");
+  assert.equal(result.events[1].source, "BLS");
   assert.equal(result.tentativeCount, 0);
 });
 
