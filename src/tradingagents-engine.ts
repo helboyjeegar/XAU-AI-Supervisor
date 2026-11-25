@@ -271,7 +271,12 @@ export async function runTradingAgentsResearch(input: TradingAgentsInput, ai: Ai
     if (!riskModel) return noTrade(runId, input.now,
       ["خروجی Risk با قرارداد خروجی معتبر مطابقت نداشت."], commonWarnings, evidence, reports, "FAILED", checks);
     const riskAge = input.risk.updatedAt === undefined ? Number.POSITIVE_INFINITY : input.now - input.risk.updatedAt;
-    const riskReport: SpecialistReport = { ...riskModel, direction: "NEUTRAL", riskChecks: {
+    const riskReport: SpecialistReport = {
+      ...riskModel,
+      direction: "NEUTRAL",
+      veto: riskModel.veto || riskModel.direction !== "NEUTRAL",
+      blockers: riskModel.direction === "NEUTRAL" ? riskModel.blockers : [...riskModel.blockers, "Risk specialist must not provide a directional trade thesis"],
+      riskChecks: {
       snapshotVerified: input.risk.verified, snapshotAgeMs: riskAge,
       dailyLossPercent: input.risk.lossPercent, maxDailyLossPercent: input.risk.maxDailyLossPercent,
       dailyLockActive: input.risk.locked, stopValid: geometry.stopValid,

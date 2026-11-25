@@ -153,6 +153,22 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
   }
   if (!env.DB) throw new Error("D1 database is not configured");
   const now = Date.now();
+  if (env.ENABLE_TRADINGAGENTS === "true") {
+    const latest = await latestResearchRun(env.DB);
+    const minimumIntervalMs = setting(env.TRADINGAGENTS_MIN_INTERVAL_MINUTES, 15) * 60_000;
+    if (latest && now - latest.created_at >= 0 && now - latest.created_at < minimumIntervalMs) {
+      return {
+        id: crypto.randomUUID(), symbol: "XAUUSD", generatedAt: now,
+        verdict: "NO_TRADE", side: "NEUTRAL", score: 0,
+        scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY", entry: null, stopLoss: null,
+        takeProfit: null, riskReward: null, reasons: [],
+        blockers: ["برای حفظ سهمیه رایگان، فاصله اجرای پژوهش هنوز به حداقل " +
+          Math.ceil(minimumIntervalMs / 60_000) + " دقیقه نرسیده است."],
+        warnings: ["پژوهش جدید اجرا نشد و هیچ فراخوانی هوش مصنوعی انجام نگرفت."],
+        agents: [], timeframes: {}, researchStatus: "BLOCKED",
+      };
+    }
+  }
   const [one, five, thirty, risk, storedMacro] = await Promise.all([
     loadCandles(env.DB, "XAUUSD", "1m", 300),
     loadCandles(env.DB, "XAUUSD", "5m", 300),
