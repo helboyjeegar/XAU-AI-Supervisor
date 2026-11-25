@@ -89,11 +89,12 @@ async function formatMarketFeedStatus(env: Env): Promise<string> {
     const m1 = latest.get("1m");
     const m5 = latest.get("5m");
     const m30 = latest.get("30m");
-    const age = (time: number | undefined) => time === undefined ? "ندارد" : Math.max(0, Math.floor((now - time - 60_000) / 60_000)) + " دقیقه";
+    const age = (time: number | undefined, durationMs: number) =>
+      time === undefined ? "ندارد" : Math.max(0, Math.floor((now - time - durationMs) / 60_000)) + " دقیقه";
     const lines = [
       "وضعیت داده بازار (SiftingIO)",
       "کندل‌ها — 1m: " + (counts.get("1m") ?? 0) + " | 5m: " + (counts.get("5m") ?? 0) + " | 30m: " + (counts.get("30m") ?? 0),
-      "سن آخرین کندل — 1m: " + age(m1) + " | 5m: " + age(m5) + " | 30m: " + age(m30),
+      "سن آخرین کندل بسته‌شده — 1m: " + age(m1, 60_000) + " | 5m: " + age(m5, 5 * 60_000) + " | 30m: " + age(m30, 30 * 60_000),
       feed?.last_success_at ? "آخرین دریافت موفق: " + new Date(feed.last_success_at).toISOString() : "آخرین دریافت موفق: هنوز ثبت نشده",
     ];
 
