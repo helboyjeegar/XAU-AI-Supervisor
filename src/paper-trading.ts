@@ -137,6 +137,11 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   if (!last || now-(last.time+MS["1m"])>180_000) return;
   await closeOpen(env.DB,last);
   await updateEquity(env.DB,now);
+  const day = utcDay(now);
+  const state = await env.DB.prepare("SELECT day_key,equity FROM paper_state WHERE id=1").first<{day_key:string;equity:number}>();
+  if (state && state.day_key !== day) {
+    await env.DB.prepare("UPDATE paper_state SET day_key=?,daily_start_equity=equity,daily_locked=0,updated_at=? WHERE id=1").bind(day,now).run();
+  }
   const alert=await maybeOpen(env.DB,now);
   if (alert) await sendTelegram(env,alert);
 }
