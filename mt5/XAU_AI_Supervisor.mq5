@@ -27,7 +27,7 @@ datetime g_lastM30Attempt = 0;
 // The bridge never sends, modifies, or closes trading orders.
 int OnInit()
 {
-   g_symbol = (_Symbol == "" ? _Symbol : _Symbol);
+   g_symbol = _Symbol;
    string checkSymbol = g_symbol;
    StringToUpper(checkSymbol);
    if(StringFind(checkSymbol, "XAUUSD") < 0 && StringFind(checkSymbol, "GOLD") < 0)
