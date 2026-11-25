@@ -183,10 +183,16 @@ function noTrade(runId: string, now: number, blockers: string[], warnings: strin
     timeframes: checks.snapshots,
   }};
 }
+const MAX_AI_INPUT_CHARACTERS = 20_000;
+
 async function invoke(ai: AiBinding, model: string, role: string, system: string, data: unknown, maxTokens: number): Promise<unknown> {
+  const userContent = JSON.stringify({ role, suppliedEvidence: data });
+  if (system.length + userContent.length > MAX_AI_INPUT_CHARACTERS) {
+    throw new Error("AI input exceeds the per-call free-tier safety limit; no inference was submitted");
+  }
   return ai.run(model, { temperature: 0, max_tokens: maxTokens, messages: [
     { role: "system", content: system },
-    { role: "user", content: JSON.stringify({ role, suppliedEvidence: data }) },
+    { role: "user", content: userContent },
   ] });
 }
 function prompt(agent: SpecialistName): string {
