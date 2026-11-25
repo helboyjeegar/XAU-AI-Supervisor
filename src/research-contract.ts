@@ -88,6 +88,8 @@ export function assessResearchBundle(input: {
   evidence: ResearchEvidence[];
   evidenceScore: number;
   now: number;
+  /** Must be computed by the DST-aware London/New York session gate. */
+  sessionAllowed: boolean;
   minimumEvidenceScore?: number;
   maxReportAgeMs?: number;
   maxRiskSnapshotAgeMs?: number;
@@ -99,6 +101,7 @@ export function assessResearchBundle(input: {
   const maxRiskSnapshotAgeMs = input.maxRiskSnapshotAgeMs ?? DEFAULT_MAX_RISK_SNAPSHOT_AGE_MS;
 
   if (!Number.isFinite(input.now)) blockers.push("Coordinator clock is invalid");
+  if (input.sessionAllowed !== true) blockers.push("Outside the allowed London/New York trading sessions");
   if (!Number.isFinite(input.evidenceScore) || input.evidenceScore < minimumEvidenceScore) {
     blockers.push(`Evidence score is below the required minimum of ${minimumEvidenceScore}`);
   }
