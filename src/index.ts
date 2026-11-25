@@ -293,7 +293,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     let verdict: string | undefined;
     try { verdict = latest ? (JSON.parse(latest.payload_json) as AnalysisResult).verdict : undefined; } catch { verdict = "خطا در خواندن آخرین تحلیل"; }
     const feedStatus = await formatMarketFeedStatus(env);
-    await sendTelegram(env, formatStatus(risk, verdict) + "\\n\\n" + feedStatus);
+    await sendTelegram(env, formatStatus(risk, verdict) + "\n\n" + feedStatus);
   } else if (text === "/analyze") {
     try { await refreshMarketData(env); await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
     catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
