@@ -5,6 +5,7 @@ import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { refreshSiftingMarketData } from "./market-feed.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, reserveAiRunBudget, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
+import { processPaperTrading, sendPaperDailyReport } from "./paper-trading.ts";
 import type { AnalysisResult, Candle, Env, MacroContext, RiskStatus, Timeframe } from "./types.ts";
 
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data, null, 2), {
@@ -469,7 +470,9 @@ export default {
     if (!env.DB) return;
     ctx.waitUntil((async () => {
       try {
-        if (controller.cron === "0 2 * * *") {
+        if (controller.cron === "5 0 * * *") {
+          await sendPaperDailyReport(env);
+        } else if (controller.cron === "0 2 * * *") {
           const retention = Date.now() - 45 * 24 * 60 * 60 * 1000;
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -478,6 +481,7 @@ export default {
         } else {
           if (!getTradingSessionStatus(Date.now()).allowed) return;
           await refreshMarketData(env);
+          await processPaperTrading(env);
           await refreshMacroCalendar(env);
           if (env.ENABLE_TRADINGAGENTS !== "true") return;
           const latest = await latestResearchRun(env.DB!);
