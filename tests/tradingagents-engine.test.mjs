@@ -32,7 +32,7 @@ function mockAi(options = {}) {
       const user = JSON.parse(request.messages[1].content);
       const data = user.suppliedEvidence;
       calls.push({ model, role: user.role, system: request.messages[0].content });
-      const ev = Array.isArray(data.evidence) ? data.evidence : [];
+      const ev = Array.isArray(data.evidence) ? data.evidence : Array.isArray(data.riskFacts?.evidence) ? data.riskFacts.evidence : [];
       const ids = (tool) => ev.filter((item) => item.tool === tool).map((item) => item.id);
       const response = (body) => ({ response: JSON.stringify(body) });
       if (user.role === "macro") return response({
