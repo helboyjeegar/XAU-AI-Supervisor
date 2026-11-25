@@ -85,7 +85,7 @@ npm run dev
 6. Configure Telegram's webhook URL and secret token as described in [docs/DEPLOYMENT_FA.md](docs/DEPLOYMENT_FA.md).
 7. Keep `ENABLE_AI_REVIEW=false` during initial deployment. Workers AI has quotas; enable the veto-only reviewer only after verifying the account's free-plan allowance and testing.
 
-The D1 binding is intentionally commented out until the real database ID exists. Do not add tokens or account credentials to GitHub.
+The D1 binding in `wrangler.toml` is configured for the existing Cloudflare database. Do not replace its ID or binding unless intentionally migrating the database. Do not add tokens or account credentials to GitHub.
 
 ## Free-tier expectations
 
