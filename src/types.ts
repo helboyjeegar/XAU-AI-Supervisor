@@ -89,6 +89,7 @@ export interface Env {
   RISK_MAX_AGE_MINUTES?: string;
   DB?: D1Database;
   INGEST_SECRET?: string;
+  SIFTING_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_CHAT_ID?: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
