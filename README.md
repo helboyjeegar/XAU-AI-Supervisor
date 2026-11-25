@@ -14,7 +14,7 @@ A signal-only XAU/USD research and risk-supervision service. The architecture is
 - Daily drawdown lock based on externally supplied start-of-day and current equity. The current equity must include floating PnL.
 - Telegram notifications with a 15-minute same-direction alert cooldown and `/status`, `/analyze`, `/help` commands.
 - Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
-- Automatic event-time protection from official BLS iCalendar, BEA release-dates JSON and Federal Reserve FOMC schedules. The sources and known assumptions are documented in [docs/MACRO_CALENDAR_FA.md](docs/MACRO_CALENDAR_FA.md).
+- Automatic event-time protection from official BLS/BEA/Federal Reserve schedules, with an attributed XOOMAR fallback when government endpoints are blocked. The fallback is limited to personal/internal use under its free terms; details and assumptions are in [docs/MACRO_CALENDAR_FA.md](docs/MACRO_CALENDAR_FA.md).
 - Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
 - GitHub Actions type-check and unit-test workflow.
 - Read-only MT5 desktop bridge source at [mt5/XAU_AI_Supervisor.mq5](mt5/XAU_AI_Supervisor.mq5), with Persian installation instructions in [docs/MT5_BRIDGE_FA.md](docs/MT5_BRIDGE_FA.md). The bridge is source code until installed and verified on the user's terminal; it does not place orders.
