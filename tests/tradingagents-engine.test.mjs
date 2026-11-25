@@ -70,7 +70,7 @@ function mockAi(options = {}) {
 test("runs isolated Macro, Quant, Risk and coordinator stages with traceable evidence", async () => {
   const { ai, calls } = mockAi();
   const run = await runTradingAgentsResearch(input(), ai, true);
-  assert.equal(run.result.verdict, "BUY");
+  assert.equal(run.result.verdict, "BUY", JSON.stringify({ blockers: run.result.blockers, warnings: run.result.warnings, calls: calls.map((item) => item.role), reports: run.reports }));
   assert.equal(run.result.researchStatus, "COMPLETED");
   assert.equal(run.result.side, "BUY");
   assert.equal(run.result.score, 100);
@@ -113,7 +113,7 @@ test("coordinator cannot reverse the Quant candidate direction", async () => {
   const { ai } = mockAi({ coordinatorSide: "SELL" });
   const run = await runTradingAgentsResearch(input(), ai, true);
   assert.equal(run.result.verdict, "NO_TRADE");
-  assert.equal(run.result.researchStatus, "FAILED");
+  assert.equal(run.result.researchStatus, "FAILED", JSON.stringify({ blockers: run.result.blockers, calls: run.result.agents }));
   assert.ok(run.result.blockers.some((item) => item.includes("تعارض")));
 });
 
