@@ -155,7 +155,7 @@ bool BootstrapTimeframe(ENUM_TIMEFRAMES timeframe, string label, datetime &lastS
    }
 
    string body = BuildCandlePayload(label, rates, copied);
-   if(!PostJson("/market/candles", body))
+   if(body == "" || !PostJson("/market/candles", body))
    {
       Print("XAU AI bridge: initial candle upload failed for ", label, ". It will retry.");
       return false;
@@ -196,7 +196,7 @@ void SendNewClosedBars(ENUM_TIMEFRAMES timeframe, string label, datetime &lastSe
       return;
 
    string body = BuildCandlePayload(label, rates, copied);
-   if(!PostJson("/market/candles", body))
+   if(body == "" || !PostJson("/market/candles", body))
    {
       Print("XAU AI bridge: candle upload failed for ", label, ". The same bars will be retried.");
       return;
@@ -205,13 +205,37 @@ void SendNewClosedBars(ENUM_TIMEFRAMES timeframe, string label, datetime &lastSe
    lastSent = rates[copied - 1].time;
 }
 
+bool GetServerUtcOffsetSeconds(int &offsetSeconds)
+{
+   datetime serverNow = TimeTradeServer();
+   datetime utcNow = TimeGMT();
+   if(serverNow <= 0 || utcNow <= 0)
+      return false;
+
+   // Broker server offsets are normally whole hours. TimeGMT relies on a correctly
+   // synchronized computer clock, so the terminal host must keep its clock accurate.
+   double rawOffset = (double)serverNow - (double)utcNow;
+   offsetSeconds = (int)(MathRound(rawOffset / 3600.0) * 3600.0);
+   if(offsetSeconds < -12 * 3600 || offsetSeconds > 14 * 3600)
+      return false;
+
+   return true;
+}
+
 string BuildCandlePayload(string timeframe, MqlRates &rates[], int count)
 {
+   int serverUtcOffset = 0;
+   if(!GetServerUtcOffsetSeconds(serverUtcOffset))
+   {
+      Print("XAU AI bridge: cannot determine broker-server UTC offset. Candle upload skipped.");
+      return "";
+   }
+
    string body = "{\"symbol\":\"XAUUSD\",\"timeframe\":\"" + timeframe + "\",\"candles\":[";
    for(int i = 0; i < count; i++)
    {
       if(i > 0) body += ",";
-      long timeMs = (long)rates[i].time * 1000;
+      long timeMs = ((long)rates[i].time - serverUtcOffset) * 1000;
       body += StringFormat(
          "{\"time\":%I64d,\"open\":%s,\"high\":%s,\"low\":%s,\"close\":%s,\"volume\":%I64d}",
          timeMs,
