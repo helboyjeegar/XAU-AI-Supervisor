@@ -85,6 +85,42 @@ void OnTimer()
       PushRiskSnapshot();
 }
 
+bool CaptureDailyBaseline(int today)
+{
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0.0)
+   {
+      g_dayStartEquity = 0.0;
+      g_riskBaselineReady = false;
+      Print("XAU AI bridge: cannot establish UTC day-start equity; risk remains unverified.");
+      return false;
+   }
+
+   datetime equitySaved = GlobalVariableSet(g_equityKey, equity);
+   datetime dateSaved = GlobalVariableSet(g_dateKey, (double)today);
+   if(equitySaved == 0 || dateSaved == 0)
+   {
+      g_dayStartEquity = 0.0;
+      g_riskBaselineReady = false;
+      Print("XAU AI bridge: failed to persist UTC day-start equity; risk remains unverified.");
+      return false;
+   }
+
+   g_utcDayKey = today;
+   g_dayStartEquity = equity;
+   g_riskBaselineReady = true;
+   g_lastRiskPush = 0;
+   Print("XAU AI bridge: UTC daily equity baseline captured and persisted.");
+   return true;
+}
+
+int UtcSecondsIntoDay()
+{
+   MqlDateTime utc;
+   TimeToStruct(TimeGMT(), utc);
+   return utc.hour * 3600 + utc.min * 60 + utc.sec;
+}
+
 void LoadSavedDailyBaseline()
 {
    int today = UtcDayKey();
@@ -101,34 +137,32 @@ void LoadSavedDailyBaseline()
       }
    }
 
-   // Never reset the day's risk baseline to the current balance/equity mid-session.
-   // The baseline is captured at the first timer event after UTC midnight only.
+   // Never replace an unknown intraday baseline with current equity.
    g_dayStartEquity = 0.0;
    g_riskBaselineReady = false;
+
+   // A first launch during the first two minutes of UTC day can safely capture
+   // the opening equity. Otherwise, wait until the next UTC midnight.
+   if(UtcSecondsIntoDay() <= 120)
+      CaptureDailyBaseline(today);
 }
 
 void RefreshDailyBaseline()
 {
    int today = UtcDayKey();
-   if(today == g_utcDayKey)
-      return;
-
-   g_utcDayKey = today;
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   if(equity <= 0.0)
+   if(today != g_utcDayKey)
    {
+      g_utcDayKey = today;
       g_dayStartEquity = 0.0;
       g_riskBaselineReady = false;
-      Print("XAU AI bridge: cannot establish UTC day-start equity; risk remains unverified.");
-      return;
    }
 
-   g_dayStartEquity = equity;
-   g_riskBaselineReady = true;
-   GlobalVariableSet(g_equityKey, g_dayStartEquity);
-   GlobalVariableSet(g_dateKey, (double)g_utcDayKey);
-   g_lastRiskPush = 0;
-   Print("XAU AI bridge: new UTC daily equity baseline captured.");
+   if(g_riskBaselineReady)
+      return;
+
+   // Retry only during the opening two-minute window. Never guess a baseline later.
+   if(UtcSecondsIntoDay() <= 120)
+      CaptureDailyBaseline(today);
 }
 
 int UtcDayKey()
