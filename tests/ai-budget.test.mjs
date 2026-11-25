@@ -11,8 +11,8 @@ test("reserves one daily AI run with an atomic cap predicate", async () => {
   const db = mockDb({ run_count: 1 });
   assert.equal(await reserveAiRunBudget(db, "2026-11-26", 8, 1234), true);
   assert.equal(db.calls.length, 1);
-  assert.match(db.calls[0].sql, /ON CONFLICT\\(day_key\\) DO UPDATE/);
-  assert.match(db.calls[0].sql, /WHERE ai_daily_budget\\.run_count < \\?/);
+  assert.match(db.calls[0].sql, /ON CONFLICT\(day_key\) DO UPDATE/);
+  assert.match(db.calls[0].sql, /WHERE ai_daily_budget\.run_count < \?/);
   assert.deepEqual(db.calls[0].values, ["2026-11-26", 1234, 8]);
 });
 
