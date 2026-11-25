@@ -24,6 +24,14 @@ This project is a Worker-compatible adaptation, not a claim that the upstream CL
 
 Equity Research is not applicable to spot gold and is not fabricated as an agent.
 
+## Session eligibility gate
+
+- Analysis is eligible only Monday-Friday from 08:00 inclusive to 17:00 exclusive in either `Europe/London` or `America/New_York`.
+- The IANA time zones are evaluated independently, so UK and US daylight-saving transitions are handled without hard-coded UTC offsets.
+- During the London/New York overlap, the session gate is open once; it does not create duplicate analysis runs.
+- Outside both windows, the Worker returns a fail-closed `NO_TRADE` result before loading candles or invoking the analysis path. No entry alert can be emitted.
+- This is a time-eligibility guard only; it is not a new trading strategy or a substitute for the TradingAgents research workflow.
+
 ## XAUUSD constraints
 
 - Only XAUUSD/GOLD aliases are accepted; data is normalized to XAUUSD.
@@ -56,6 +64,7 @@ No paid model provider may be enabled silently. Before enabling a model route, v
 
 - Architecture plan and upstream-compatible agent/skill specifications are on the feature branch.
 - A Worker-safe evidence-linked specialist-report contract has been added with fail-closed tests.
+- London/New York IANA session eligibility is wired into the feature-branch analysis entry point; boundary, overlap, weekend and DST tests are included. This change is not deployed.
 - The existing live `analyzeMarket` path has not yet been replaced or wired to these contracts.
 - Model-client adapter, specialist orchestration, evidence persistence and end-to-end tests remain pending review.
 - The live Worker and `develop` remain unchanged until the replacement passes CI and staging smoke tests.
