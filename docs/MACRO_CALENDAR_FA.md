@@ -4,8 +4,10 @@
 
 ## منابع
 
-- **Bureau of Labor Statistics (BLS)**: فید iCalendar رسمی برای زمان‌بندی CPI، PPI و Employment Situation. BLS اعلام می‌کند تقویم آنلاین شامل زمان‌بندی بیشتر انتشارهای خبری دفتر ملی است و معمولاً جمعه‌ها به‌روزرسانی می‌شود.
-  - https://www.bls.gov/schedule/news_release/bls.ics
+- **Bureau of Labor Statistics (BLS)**: ابتدا فید iCalendar رسمی را می‌خوانیم. اگر میزبان این فید دسترسی Worker را رد کند، از صفحات رسمی سال جاری و سال آینده در وب‌سایت BLS استفاده می‌کنیم. هر دو صفحه باید موجود و دارای تاریخ به‌روزرسانی کمتر از ۴۵ روز باشند؛ در غیر این صورت sync کامل رد می‌شود.
+  - iCalendar: https://www.bls.gov/schedule/news_release/bls.ics
+  - Schedule 2026: https://www.bls.gov/schedule/2026/home.htm
+  - Schedule 2027: https://www.bls.gov/schedule/2027/home.htm
 - **Bureau of Economic Analysis (BEA)**: فایل JSON رسمی release dates. سیستم فقط GDP و Personal Income and Outlays (که انتشار PCE در آن است) را از این فایل انتخاب می‌کند.
   - https://apps.bea.gov/API/signup/release_dates.json
 - **Federal Reserve**: صفحه رسمی جلسات FOMC برای سال‌های جاری و آینده. سیستم روز دوم جلسه را روز انتشار سیاست در نظر می‌گیرد.
