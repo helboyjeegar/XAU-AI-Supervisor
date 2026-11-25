@@ -89,6 +89,7 @@ export interface Env {
   AI_MODEL?: string;
   ENABLE_TRADINGAGENTS?: string;
   TRADINGAGENTS_MIN_INTERVAL_MINUTES?: string;
+  TRADINGAGENTS_MAX_RUNS_PER_UTC_DAY?: string;
   ENABLE_AI_REVIEW?: string;
   ALERT_COOLDOWN_MINUTES?: string;
   RISK_MAX_AGE_MINUTES?: string;
