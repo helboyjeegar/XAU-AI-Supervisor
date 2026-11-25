@@ -16,13 +16,14 @@ A signal-only XAU/USD research and risk-supervision service. The architecture is
 - Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
 - Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
 - GitHub Actions type-check and unit-test workflow.
+- Read-only MT5 desktop bridge source at [mt5/XAU_AI_Supervisor.mq5](mt5/XAU_AI_Supervisor.mq5), with Persian installation instructions in [docs/MT5_BRIDGE_FA.md](docs/MT5_BRIDGE_FA.md). The bridge is source code until installed and verified on the user's terminal; it does not place orders.
 
 The score is an **evidence score, not a statistically calibrated probability**. Standard RSI is not the proprietary Luxe Algo Ultimate RSI; tick volume is broker-specific and is not centralized spot-gold volume. Proprietary indicator readings are not fabricated.
 
 ## Runtime architecture
 
 ```text
-Market feed / MT5 bridge / authorized chart webhook
+MT5 broker feed / other authorized market feed
                      |
                      v
               Cloudflare Worker
@@ -88,16 +89,15 @@ The D1 binding is intentionally commented out until the real database ID exists.
 
 ## Free-tier expectations
 
-The architecture avoids a dedicated always-on server. Cloudflare Free is quota-limited, not unlimited: Workers, D1 and Workers AI each have usage ceilings. The current release does not require a paid LLM API. The optional Workers AI reviewer is disabled by default; its free-plan availability is quota-limited and is not an unlimited inference service. A reliable live economic calendar, gold price feed, or AI model may have separate quotas or paid tiers; no provider is represented as unlimited-free.
+The architecture avoids a dedicated always-on server. Cloudflare Free is quota-limited, not unlimited: Workers, D1 and Workers AI each have usage ceilings. The current release does not require a paid LLM API. The optional Workers AI reviewer is disabled by default; its free-plan availability is quota-limited and is not an unlimited inference service. A reliable live economic calendar, gold price feed, or AI model may have separate quotas or paid tiers; no provider is represented as unlimited-free. The MT5 bridge uses the gold price feed provided by the user's own broker and does not require a separate market-data API subscription; it does require MT5 desktop to remain connected and running.
 
 ## Roadmap
 
-1. Verify Worker + D1 + Telegram end-to-end in the user's Cloudflare account.
-2. Implement a secure MT5 desktop Expert Advisor bridge for 1m/5m/30m candles and equity snapshots; Android MT5 cannot run an EA.
-3. Add sourced macro/calendar and dollar/yield adapters with timestamp and freshness guarantees.
-4. Backtest using broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
-5. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
-6. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
+1. Verify the MT5 bridge end-to-end on the user's broker: 1m/5m/30m closed candles, equity snapshots, data freshness and reconnect recovery.
+2. Add sourced macro/calendar and dollar/yield adapters with timestamp and freshness guarantees.
+3. Backtest using broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
+4. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
+5. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
 
 ## License
 
