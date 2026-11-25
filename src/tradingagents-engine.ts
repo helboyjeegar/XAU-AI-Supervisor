@@ -251,7 +251,7 @@ export async function runTradingAgentsResearch(input: TradingAgentsInput, ai: Ai
     const entry = one.lastClose, distance = one.atr14 * input.stopAtrMultiplier, targetDistance = distance * input.minRiskReward;
     const stopLoss = quantSide === "BULLISH" ? entry - distance : entry + distance;
     const takeProfit = quantSide === "BULLISH" ? entry + targetDistance : entry - targetDistance;
-    const geometry = { entry, stopLoss, takeProfit, rewardRisk: distance > 0 ? targetDistance / distance : 0,
+    const geometry = { entry, stopLoss, takeProfit, rewardRisk: distance > 0 ? Number((targetDistance / distance).toFixed(6)) : 0,
       stopValid: Number.isFinite(distance) && distance > 0 &&
         (quantSide === "BULLISH" ? stopLoss < entry && takeProfit > entry : stopLoss > entry && takeProfit < entry) };
     const geom: ResearchEvidence = { id: runId + ":risk:geometry", tool: "risk_geometry",
