@@ -200,7 +200,12 @@ function specialist(v: unknown, agent: SpecialistName, ids: Set<string>, now: nu
   return parsed ? { agent, generatedAt: now, ...parsed } : null;
 }
 
-export async function runTradingAgentsResearch(input: TradingAgentsInput, ai: AiBinding | undefined, enabled: boolean): Promise<TradingAgentsExecution> {
+export async function runTradingAgentsResearch(
+  input: TradingAgentsInput,
+  ai: AiBinding | undefined,
+  enabled: boolean,
+  reserveBudget?: () => Promise<boolean>,
+): Promise<TradingAgentsExecution> {
   const runId = crypto.randomUUID(), checks = inspect(input), evidence = evidenceFor(runId, input, checks);
   const commonWarnings = [...checks.warnings, "snapshot حساب از منبع ثبت‌شده خوانده می‌شود و به معنی تأیید مستقل بروکر نیست."];
   if (!enabled) return noTrade(runId, input.now,
@@ -210,6 +215,17 @@ export async function runTradingAgentsResearch(input: TradingAgentsInput, ai: Ai
     commonWarnings, evidence, [], "BLOCKED", checks);
   if (!ai) return noTrade(runId, input.now, ["اتصال Workers AI در دسترس نیست."],
     commonWarnings, evidence, [], "FAILED", checks);
+  if (!reserveBudget) return noTrade(runId, input.now,
+    ["کنترل سهمیه روزانه هوش مصنوعی پیکربندی نشده است؛ برای جلوگیری از مصرف کنترل‌نشده، اجرا متوقف شد."],
+    commonWarnings, evidence, [], "BLOCKED", checks);
+  let budgetReserved = false;
+  try { budgetReserved = await reserveBudget(); }
+  catch { return noTrade(runId, input.now,
+    ["وضعیت سهمیه روزانه قابل بررسی نیست؛ برای جلوگیری از مصرف کنترل‌نشده، اجرا متوقف شد."],
+    commonWarnings, evidence, [], "BLOCKED", checks); }
+  if (!budgetReserved) return noTrade(runId, input.now,
+    ["سقف اجرای روزانه هوش مصنوعی پر شده است؛ هیچ فراخوانی مدلی انجام نشد."],
+    commonWarnings, evidence, [], "BLOCKED", checks);
 
   const ids = new Set(evidence.map((e) => e.id)), model = input.modelName;
   const marketFacts = {
