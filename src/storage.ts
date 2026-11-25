@@ -42,6 +42,20 @@ export function tradingDayKey(timezone = "UTC", now = new Date()): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
+export async function reserveAiRunBudget(db: D1Database, dayKey: string, maxRuns: number, now = Date.now()): Promise<boolean> {
+  if (!Number.isInteger(maxRuns) || maxRuns < 1 || !/^\\d{4}-\\d{2}-\\d{2}$/.test(dayKey)) return false;
+  const reservation = await db.prepare(
+    `INSERT INTO ai_daily_budget (day_key, run_count, updated_at)
+     VALUES (?, 1, ?)
+     ON CONFLICT(day_key) DO UPDATE SET
+       run_count = ai_daily_budget.run_count + 1,
+       updated_at = excluded.updated_at
+     WHERE ai_daily_budget.run_count < ?
+     RETURNING run_count`
+  ).bind(dayKey, now, maxRuns).first<{ run_count: number }>();
+  return Boolean(reservation);
+}
+
 export async function saveRiskSnapshot(db: D1Database, dayKey: string, dayStartEquity: number, currentEquity: number, maxDailyLossPercent: number, observedAt = Date.now(), maxAgeMs = 120_000): Promise<RiskStatus> {
   const lossPercent = Math.max(0, (dayStartEquity - currentEquity) / dayStartEquity * 100);
   const lockedNow = lossPercent >= maxDailyLossPercent ? 1 : 0;
