@@ -62,7 +62,7 @@ test("BLS annual HTML schedule rejects stale official pages", () => {
 
 test("XOOMAR fallback validates freshness, attribution and official source coverage", () => {
   const payload = {
-    updatedAt: "2026-11-25T14:55:00.000Z",
+    updatedAt: "2026-11-19T14:55:00.000Z",
     meta: { sourceAttribution: "Data: XOOMAR" },
     data: [
       { source: "bls", eventName: "Consumer Price Index", importance: "high", scheduledAt: "2026-12-10T13:30:00.000Z" },
@@ -89,8 +89,8 @@ test("XOOMAR fallback rejects stale data and missing attribution", () => {
     ]
   };
   assert.throws(
-    () => parseXoomarCalendar(JSON.stringify({ ...base, updatedAt: "2026-11-20T14:55:00.000Z" }), now),
-    /older than 48 hours/
+    () => parseXoomarCalendar(JSON.stringify({ ...base, updatedAt: "2026-11-15T14:55:00.000Z" }), now),
+    /older than 8 days/
   );
   assert.throws(
     () => parseXoomarCalendar(JSON.stringify({ ...base, updatedAt: "2026-11-25T14:55:00.000Z", meta: {} }), now),
