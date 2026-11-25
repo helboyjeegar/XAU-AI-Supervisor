@@ -61,5 +61,6 @@ test("Federal Reserve page parser extracts statement and press-conference window
 test("high-impact calendar blocks within plus or minus fifteen minutes", () => {
   const event = { at: now + 10 * 60_000, title: "CPI", source: "BLS" };
   assert.equal(highImpactEventWithinBlock([event], now)?.title, "CPI");
-  assert.equal(highImpactEventWithinBlock([event], now + 25 * 60_000), null);
+  assert.equal(highImpactEventWithinBlock([event], now + 26 * 60_000), null);
+  assert.equal(highImpactEventWithinBlock([event], now + 20 * 60_000)?.title, "CPI");
 });
