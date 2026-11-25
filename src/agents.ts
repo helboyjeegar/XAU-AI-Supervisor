@@ -31,9 +31,22 @@ export interface AgentOutput {
 
 const last = <T>(items: T[]): T => items[items.length - 1]!;
 
-function freshnessBlock(candles: Candle[], maxAgeMs: number, now: number, label: string): string | null {
+function freshnessBlock(
+  candles: Candle[],
+  maxAgeMs: number,
+  now: number,
+  label: string,
+  candleDurationMs: number,
+): string | null {
   const newest = candles.at(-1)?.time;
-  if (newest === undefined || now - newest > maxAgeMs || newest > now + 60_000) return `${label} candles are missing or stale`;
+  if (newest === undefined) return `${label} candles are missing or stale`;
+
+  // Candle timestamps mark bucket open time. Judge freshness at the bucket close,
+  // otherwise a valid 30m candle appears stale halfway through the next 30m bucket.
+  const candleClosedAt = newest + candleDurationMs;
+  if (candleClosedAt > now + 60_000 || now - candleClosedAt > maxAgeMs) {
+    return `${label} candles are missing or stale`;
+  }
   return null;
 }
 
@@ -110,9 +123,9 @@ export function runAgents(input: AgentInput): AgentOutput {
   const five = snapshot(fiveMinute, "5m");
   const thirty = snapshot(thirtyMinute, "30m");
   if (!one || !five || !thirty) blockers.push("برای هر سه تایم‌فریم حداقل ۵۵ کندل معتبر لازم است");
-  if (freshnessBlock(oneMinute, 3 * 60_000, input.now, "1m")) blockers.push("داده یک‌دقیقه‌ای به‌روز نیست");
-  if (freshnessBlock(fiveMinute, 12 * 60_000, input.now, "5m")) blockers.push("داده پنج‌دقیقه‌ای به‌روز نیست");
-  if (freshnessBlock(thirtyMinute, 40 * 60_000, input.now, "30m")) blockers.push("داده سی‌دقیقه‌ای به‌روز نیست");
+  if (freshnessBlock(oneMinute, 3 * 60_000, input.now, "1m", 60_000)) blockers.push("داده یک‌دقیقه‌ای به‌روز نیست");
+  if (freshnessBlock(fiveMinute, 12 * 60_000, input.now, "5m", 5 * 60_000)) blockers.push("داده پنج‌دقیقه‌ای به‌روز نیست");
+  if (freshnessBlock(thirtyMinute, 40 * 60_000, input.now, "30m", 30 * 60_000)) blockers.push("داده سی‌دقیقه‌ای به‌روز نیست");
   if (!one || !five || !thirty) {
     const empty: AgentFinding[] = [{ agent: "Gold Technical Analyst", direction: "NEUTRAL", score: 0, evidence: [], warnings: ["داده کافی نیست"] }];
     return { buyScore: 0, sellScore: 0, agents: empty, snapshots: {}, reasons, blockers, warnings, entry: null, stopLoss: null, takeProfit: null, riskReward: null };
