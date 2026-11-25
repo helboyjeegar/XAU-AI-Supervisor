@@ -198,11 +198,24 @@ export function highImpactEventWithinBlock(events: CalendarEvent[], now: number,
 }
 
 async function fetchText(url: string, accept: string): Promise<string> {
-  const response = await fetch(url, {
-    headers: { accept, "cache-control": "no-cache" },
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) throw new Error(`Calendar fetch failed (${response.status}): ${url}`);
+  const host = new URL(url).hostname;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: {
+        accept,
+        "cache-control": "no-cache",
+        "user-agent": "XAU-AI-Supervisor/0.3 (+https://github.com/helboyjeegar/XAU-AI-Supervisor)",
+      },
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    throw new Error(`Calendar network request failed for ${host}: ${detail}`);
+  }
+  if (!response.ok) {
+    throw new Error(`Calendar HTTP ${response.status} from ${host}; content-type=${response.headers.get("content-type") ?? "unknown"}`);
+  }
   return response.text();
 }
 
