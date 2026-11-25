@@ -14,6 +14,7 @@ A signal-only XAU/USD research and risk-supervision service. The architecture is
 - Daily drawdown lock based on externally supplied start-of-day and current equity. The current equity must include floating PnL.
 - Telegram notifications with a 15-minute same-direction alert cooldown and `/status`, `/analyze`, `/help` commands.
 - Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
+- Automatic event-time protection from official BLS iCalendar, BEA release-dates JSON and Federal Reserve FOMC schedules. The sources and known assumptions are documented in [docs/MACRO_CALENDAR_FA.md](docs/MACRO_CALENDAR_FA.md).
 - Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
 - GitHub Actions type-check and unit-test workflow.
 - Read-only MT5 desktop bridge source at [mt5/XAU_AI_Supervisor.mq5](mt5/XAU_AI_Supervisor.mq5), with Persian installation instructions in [docs/MT5_BRIDGE_FA.md](docs/MT5_BRIDGE_FA.md). The bridge is source code until installed and verified on the user's terminal; it does not place orders.
@@ -94,10 +95,11 @@ The architecture avoids a dedicated always-on server. Cloudflare Free is quota-l
 ## Roadmap
 
 1. Verify the MT5 bridge end-to-end on the user's broker: 1m/5m/30m closed candles, equity snapshots, data freshness and reconnect recovery.
-2. Add sourced macro/calendar and dollar/yield adapters with timestamp and freshness guarantees.
-3. Backtest using broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
-4. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
-5. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
+2. Add timestamped DXY and US 10-year Treasury yield data; the current release protects against scheduled events but does not yet read these market series.
+3. Verify the official calendar sync against live BLS/BEA/Federal Reserve responses and handle source outages or schedule changes.
+4. Backtest using broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
+5. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
+6. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
 
 ## License
 
