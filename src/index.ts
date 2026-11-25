@@ -285,17 +285,17 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   if (!asObject(update) || !asObject(update.message) || !asObject(update.message.chat)) return json({ ok: true, ignored: true });
   const chatId = String(update.message.chat.id ?? "");
   const messageText = typeof update.message.text === "string" ? update.message.text.trim() : "";
-  const command = messageText.split(/\\s+/, 1)[0].split("@", 1)[0];
+  const command = messageText.split(/\s+/, 1)[0].split("@", 1)[0];
   if (!env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return json({ ok: true, ignored: true });
   if (command === "/help" || command === "/start") {
-    await sendTelegram(env, "دستورات:\\n/status — وضعیت ریسک و سیستم\\n/risk — ثبت دستی ریسک حساب\\n/analyze — اجرای تحلیل جدید\\n/help — راهنما\\n\\nبرای ثبت ریسک بنویس:\\n/risk 10000 9950\\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و سیستم\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
   } else if (command === "/risk") {
     if (!env.DB) {
       await sendTelegram(env, "ثبت ریسک انجام نشد: پایگاه داده در دسترس نیست.");
     } else {
       const values = parseRiskCommand(messageText);
       if (!values) {
-        await sendTelegram(env, "فرمت درست نیست.\\nنمونه: /risk 10000 9950\\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
+        await sendTelegram(env, "فرمت درست نیست.\nنمونه: /risk 10000 9950\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
       } else {
         const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
         const existing = await env.DB.prepare("SELECT day_start_equity FROM daily_risk WHERE day_key = ?").bind(dayKey).first<{ day_start_equity: number }>();
@@ -320,7 +320,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
             "قفل روزانه: " + (risk.locked ? "فعال" : "غیرفعال"),
             "اعتبار زمانی: حداکثر ۲ دقیقه",
             "توجه: اعداد توسط کاربر وارد شده‌اند و مستقلاً از بروکر تأیید نشده‌اند.",
-          ].join("\\n"));
+          ].join("\n"));
         }
       }
     }
