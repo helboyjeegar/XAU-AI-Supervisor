@@ -19,6 +19,11 @@ function authorized(request: Request, env: Env): boolean {
   return Boolean(env.INGEST_SECRET && provided.length === env.INGEST_SECRET.length && provided === env.INGEST_SECRET);
 }
 
+async function telegramWebhookToken(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function normalizeSymbol(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const normalized = value.toUpperCase().replace(/[\s/_-]/g, "");
@@ -123,7 +128,7 @@ async function handleTelegramSetup(request: Request, env: Env): Promise<Response
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       url: webhookUrl,
-      secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+      secret_token: await telegramWebhookToken(env.TELEGRAM_WEBHOOK_SECRET),
       allowed_updates: ["message"],
       drop_pending_updates: false,
     }),
@@ -160,7 +165,7 @@ async function ensureTelegramWebhook(env: Env): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         url: webhookUrl,
-        secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+        secret_token: await telegramWebhookToken(env.TELEGRAM_WEBHOOK_SECRET),
         allowed_updates: ["message"],
         drop_pending_updates: false,
       }),
@@ -195,7 +200,7 @@ async function handleTelegramWebhookInfo(request: Request, env: Env): Promise<Re
 }
 
 async function handleTelegram(request: Request, env: Env): Promise<Response> {
-  if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("x-telegram-bot-api-secret-token") !== env.TELEGRAM_WEBHOOK_SECRET) return json({ ok: false }, 401);
+  if (!env.TELEGRAM_WEBHOOK_SECRET || request.headers.get("x-telegram-bot-api-secret-token") !== await telegramWebhookToken(env.TELEGRAM_WEBHOOK_SECRET)) return json({ ok: false }, 401);
   let update: unknown;
   try { update = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
   if (!asObject(update) || !asObject(update.message) || !asObject(update.message.chat)) return json({ ok: true, ignored: true });
