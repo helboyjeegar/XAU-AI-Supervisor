@@ -43,7 +43,7 @@ export function tradingDayKey(timezone = "UTC", now = new Date()): string {
 }
 
 export async function reserveAiRunBudget(db: D1Database, dayKey: string, maxRuns: number, now = Date.now()): Promise<boolean> {
-  if (!Number.isInteger(maxRuns) || maxRuns < 1 || !/^\d{4}-\\d{2}-\\d{2}$/.test(dayKey)) return false;
+  if (!Number.isInteger(maxRuns) || maxRuns < 1 || !/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return false;
   const reservation = await db.prepare(
     `INSERT INTO ai_daily_budget (day_key, run_count, updated_at)
      VALUES (?, 1, ?)
