@@ -3,7 +3,7 @@ import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { refreshSiftingMarketData } from "./market-feed.ts";
 import { challengeCandidate } from "./ai-challenger.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
-import { formatAnalysis, formatStatus, sendTelegram } from "./telegram.ts";
+import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import type { AnalysisResult, Candle, Env, MacroContext, RiskStatus, Timeframe } from "./types.ts";
 
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data, null, 2), {
@@ -284,11 +284,47 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   try { update = await request.json(); } catch { return json({ ok: false, error: "Invalid JSON" }, 400); }
   if (!asObject(update) || !asObject(update.message) || !asObject(update.message.chat)) return json({ ok: true, ignored: true });
   const chatId = String(update.message.chat.id ?? "");
-  const text = typeof update.message.text === "string" ? update.message.text.trim().split(" ")[0] : "";
+  const messageText = typeof update.message.text === "string" ? update.message.text.trim() : "";
+  const command = messageText.split(/\\s+/, 1)[0].split("@", 1)[0];
   if (!env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return json({ ok: true, ignored: true });
-  if (text === "/help" || text === "/start") {
-    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و سیستم\n/analyze — اجرای تحلیل جدید\n/help — راهنما\n\nاین ربات فقط تحلیل و هشدار ارائه می‌کند و سفارش ثبت نمی‌کند.");
-  } else if (text === "/status") {
+  if (command === "/help" || command === "/start") {
+    await sendTelegram(env, "دستورات:\\n/status — وضعیت ریسک و سیستم\\n/risk — ثبت دستی ریسک حساب\\n/analyze — اجرای تحلیل جدید\\n/help — راهنما\\n\\nبرای ثبت ریسک بنویس:\\n/risk 10000 9950\\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+  } else if (command === "/risk") {
+    if (!env.DB) {
+      await sendTelegram(env, "ثبت ریسک انجام نشد: پایگاه داده در دسترس نیست.");
+    } else {
+      const values = parseRiskCommand(messageText);
+      if (!values) {
+        await sendTelegram(env, "فرمت درست نیست.\\nنمونه: /risk 10000 9950\\nعدد اول: Equity ابتدای روز معاملاتی؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو را از یک حساب و با یک ارز وارد کن.");
+      } else {
+        const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
+        const existing = await env.DB.prepare("SELECT day_start_equity FROM daily_risk WHERE day_key = ?").bind(dayKey).first<{ day_start_equity: number }>();
+        if (existing && Math.abs(existing.day_start_equity - values.dayStartEquity) > 0.000001) {
+          await sendTelegram(env, "مبنای Equity ابتدای روز با مقدار ثبت‌شده امروز یکسان نیست. برای جلوگیری از محاسبه اشتباه، مقدار اول را تغییر ندادم. مقدار مبنای ثبت‌شده: " + existing.day_start_equity);
+        } else {
+          const observedAt = Date.now();
+          const risk = await saveRiskSnapshot(
+            env.DB,
+            dayKey,
+            values.dayStartEquity,
+            values.currentEquity,
+            setting(env.MAX_DAILY_LOSS_PERCENT, 5),
+            observedAt,
+            setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
+          );
+          await sendTelegram(env, [
+            "ثبت دستی وضعیت ریسک انجام شد.",
+            "Equity ابتدای روز: " + values.dayStartEquity,
+            "Equity فعلی: " + values.currentEquity,
+            "افت روزانه: " + risk.lossPercent.toFixed(2) + "% / " + risk.maxDailyLossPercent.toFixed(2) + "%",
+            "قفل روزانه: " + (risk.locked ? "فعال" : "غیرفعال"),
+            "اعتبار زمانی: حداکثر ۲ دقیقه",
+            "توجه: اعداد توسط کاربر وارد شده‌اند و مستقلاً از بروکر تأیید نشده‌اند.",
+          ].join("\\n"));
+        }
+      }
+    }
+  } else if (command === "/status") {
     const risk = await readRisk(env);
     const latest = env.DB ? await latestAnalysis(env.DB) : null;
     let verdict: string | undefined;
