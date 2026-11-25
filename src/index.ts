@@ -1,5 +1,6 @@
 import { analyzeMarket } from "./analysis.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
+import { refreshSiftingMarketData } from "./market-feed.ts";
 import { challengeCandidate } from "./ai-challenger.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, sendTelegram } from "./telegram.ts";
@@ -55,6 +56,11 @@ async function readRisk(env: Env): Promise<RiskStatus> {
   return readRiskStatus(env.DB, dayKey, setting(env.MAX_DAILY_LOSS_PERCENT, 5), Date.now(), setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000);
 }
 
+async function refreshMarketData(env: Env): Promise<void> {
+  if (!env.DB || !env.SIFTING_API_KEY) return;
+  await refreshSiftingMarketData(env.DB, env.SIFTING_API_KEY, Date.now());
+}
+
 async function refreshMacroCalendar(env: Env): Promise<void> {
   if (!env.DB) return;
   try {
@@ -89,6 +95,16 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
     macroMaxAgeMinutes: setting(env.MACRO_MAX_AGE_MINUTES, 30),
   });
+
+  if (env.SIFTING_API_KEY) {
+    result = {
+      ...result,
+      warnings: [
+        ...result.warnings,
+        "منبع قیمت: SiftingIO؛ قیمت مرجع تجمیعی است و ممکن است با قیمت نماد بروکر تفاوت داشته باشد. پیش از هر تصمیم، با نمودار بروکر تطبیق بده.",
+      ],
+    };
+  }
 
   if (result.verdict !== "NO_TRADE") {
     const review = await challengeCandidate(env, result);
@@ -229,7 +245,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     try { verdict = latest ? (JSON.parse(latest.payload_json) as AnalysisResult).verdict : undefined; } catch { verdict = "خطا در خواندن آخرین تحلیل"; }
     await sendTelegram(env, formatStatus(risk, verdict));
   } else if (text === "/analyze") {
-    try { await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
+    try { await refreshMarketData(env); await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
     catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
   } else {
     await sendTelegram(env, "دستور شناخته نشد. /help را بفرست.");
@@ -240,7 +256,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
 async function handleRequest(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/") return json({ service: "XAU AI Supervisor", version: "0.3.0", mode: "analysis-and-alerts-only", endpoints: ["GET /health", "POST /market/candles", "POST /macro/context", "POST /risk/snapshot", "POST /analysis/run", "GET /analysis/latest", "POST /telegram/webhook"] });
-  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), aiReviewEnabled: env.ENABLE_AI_REVIEW === "true", aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
+  if (request.method === "GET" && url.pathname === "/health") return json({ ok: true, databaseConfigured: Boolean(env.DB), telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && env.TELEGRAM_WEBHOOK_SECRET), ingestSecretConfigured: Boolean(env.INGEST_SECRET), marketDataConfigured: Boolean(env.SIFTING_API_KEY), marketDataProvider: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "not-configured", aiReviewEnabled: env.ENABLE_AI_REVIEW === "true", aiBindingConfigured: Boolean(env.AI), executionEnabled: false });
   if (request.method === "POST" && url.pathname === "/telegram/setup-webhook") return handleTelegramSetup(request, env);
   if (request.method === "GET" && url.pathname === "/telegram/webhook-info") return handleTelegramWebhookInfo(request, env);
   if (request.method === "POST" && url.pathname === "/telegram/webhook") return handleTelegram(request, env);
@@ -307,6 +323,7 @@ export default {
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
         } else {
+          await refreshMarketData(env);
           await refreshMacroCalendar(env);
           await runAnalysis(env);
         }
