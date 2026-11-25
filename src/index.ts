@@ -147,6 +147,35 @@ async function handleTelegramSetup(request: Request, env: Env): Promise<Response
   }, info.url === webhookUrl ? 200 : 502);
 }
 
+async function ensureTelegramWebhook(env: Env): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_WEBHOOK_SECRET) return;
+  const webhookUrl = "https://xau-ai-supervisor.novarw0hnqiw.workers.dev/telegram/webhook";
+  const apiBase = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+  try {
+    const infoResponse = await fetch(`${apiBase}/getWebhookInfo`);
+    const info: unknown = await infoResponse.json().catch(() => null);
+    if (infoResponse.ok && asObject(info) && info.ok === true && asObject(info.result) && info.result.url === webhookUrl) return;
+    const setResponse = await fetch(`${apiBase}/setWebhook`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        url: webhookUrl,
+        secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+        allowed_updates: ["message"],
+        drop_pending_updates: false,
+      }),
+    });
+    const setResult: unknown = await setResponse.json().catch(() => null);
+    if (!setResponse.ok || !asObject(setResult) || setResult.ok !== true) {
+      console.error("Telegram webhook auto-setup failed", asObject(setResult) ? setResult.description : "Telegram API error");
+      return;
+    }
+    console.log("Telegram webhook auto-setup completed");
+  } catch (error) {
+    console.error("Telegram webhook auto-setup request failed", error);
+  }
+}
+
 async function handleTelegramWebhookInfo(request: Request, env: Env): Promise<Response> {
   if (!authorized(request, env)) return json({ ok: false, error: "Unauthorized" }, 401);
   if (!env.TELEGRAM_BOT_TOKEN) return json({ ok: false, error: "Telegram bot token is not configured" }, 503);
@@ -251,6 +280,7 @@ export default {
     catch (error) { return json({ ok: false, error: error instanceof Error ? error.message : "Internal error" }, 500); }
   },
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(ensureTelegramWebhook(env));
     if (!env.DB) return;
     ctx.waitUntil((async () => {
       try {
