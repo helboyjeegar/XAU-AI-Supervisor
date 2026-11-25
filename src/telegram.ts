@@ -39,3 +39,17 @@ export function formatStatus(risk: RiskStatus, lastVerdict?: string): string {
     "حالت سیستم: فقط تحلیل و هشدار؛ بدون اجرای سفارش",
   ].join("\n");
 }
+
+export function parseRiskCommand(message: string): { dayStartEquity: number; currentEquity: number } | null {
+  const parts = message.trim().split(/\\s+/);
+  if (parts.length !== 3 || !/^\\/risk(?:@[^\\s]+)?$/i.test(parts[0])) return null;
+  const parseAmount = (raw: string): number | null => {
+    const normalized = raw.replace(/,/g, "");
+    if (!/^\\d+(?:\\.\\d{1,4})?$/.test(normalized)) return null;
+    const value = Number(normalized);
+    return Number.isFinite(value) && value > 0 && value <= 1_000_000_000 ? value : null;
+  };
+  const dayStartEquity = parseAmount(parts[1]);
+  const currentEquity = parseAmount(parts[2]);
+  return dayStartEquity === null || currentEquity === null ? null : { dayStartEquity, currentEquity };
+}
