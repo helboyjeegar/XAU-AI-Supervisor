@@ -35,9 +35,14 @@ export function formatAnalysis(result: AnalysisResult): string {
 }
 
 export function formatStatus(risk: RiskStatus, lastVerdict?: string): string {
+  const riskLabel = risk.verified && risk.updatedAt !== undefined
+    ? "snapshot تازه است؛ ورودی دستی/خارجی و بدون تأیید مستقل بروکر"
+    : risk.updatedAt !== undefined
+      ? "snapshot قدیمی یا نامعتبر است؛ ثبت مجدد لازم است"
+      : "snapshot ثبت نشده است";
   return [
     "وضعیت XAU AI SUPERVISOR",
-    `وضعیت ریسک: ${risk.verified ? "دریافت شده" : "تأیید نشده"}`,
+    `وضعیت ریسک: ${riskLabel}`,
     `افت روزانه: ${risk.lossPercent.toFixed(2)}% / ${risk.maxDailyLossPercent.toFixed(2)}%`,
     `قفل روزانه: ${risk.locked ? "فعال" : "غیرفعال"}`,
     `آخرین نتیجه: ${lastVerdict ?? "هنوز تحلیلی ثبت نشده"}`,
