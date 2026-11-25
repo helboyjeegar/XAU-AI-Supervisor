@@ -61,6 +61,55 @@ async function refreshMarketData(env: Env): Promise<void> {
   await refreshSiftingMarketData(env.DB, env.SIFTING_API_KEY, Date.now());
 }
 
+async function formatMarketFeedStatus(env: Env): Promise<string> {
+  if (!env.SIFTING_API_KEY) return "داده طلا: کلید SiftingIO هنوز در Cloudflare تنظیم نشده است.";
+  if (!env.DB) return "داده طلا: پایگاه داده در دسترس نیست.";
+
+  try {
+    const [feed, candleRows, macro] = await Promise.all([
+      env.DB.prepare(
+        "SELECT last_attempt_at, last_success_at, last_bar_at, last_error FROM market_feed_state WHERE provider = 'siftingio'",
+      ).first<{
+        last_attempt_at: number;
+        last_success_at: number | null;
+        last_bar_at: number | null;
+        last_error: string | null;
+      }>(),
+      env.DB.prepare(
+        "SELECT timeframe, COUNT(*) AS candle_count, MAX(ts) AS latest_candle_ms FROM market_candles WHERE symbol = 'XAUUSD' GROUP BY timeframe",
+      ).all<{ timeframe: string; candle_count: number; latest_candle_ms: number }>(),
+      env.DB.prepare(
+        "SELECT source, as_of, note FROM macro_context WHERE id = 1",
+      ).first<{ source: string; as_of: number; note: string | null }>(),
+    ]);
+
+    const counts = new Map((candleRows.results ?? []).map((row) => [row.timeframe, row.candle_count]));
+    const latest = new Map((candleRows.results ?? []).map((row) => [row.timeframe, row.latest_candle_ms]));
+    const now = Date.now();
+    const m1 = latest.get("1m");
+    const m5 = latest.get("5m");
+    const m30 = latest.get("30m");
+    const age = (time: number | undefined) => time === undefined ? "ندارد" : Math.max(0, Math.floor((now - time - 60_000) / 60_000)) + " دقیقه";
+    const lines = [
+      "وضعیت داده بازار (SiftingIO)",
+      "کندل‌ها — 1m: " + (counts.get("1m") ?? 0) + " | 5m: " + (counts.get("5m") ?? 0) + " | 30m: " + (counts.get("30m") ?? 0),
+      "سن آخرین کندل — 1m: " + age(m1) + " | 5m: " + age(m5) + " | 30m: " + age(m30),
+      feed?.last_success_at ? "آخرین دریافت موفق: " + new Date(feed.last_success_at).toISOString() : "آخرین دریافت موفق: هنوز ثبت نشده",
+    ];
+
+    if (feed?.last_error) lines.push("خطای آخر فید: " + feed.last_error.slice(0, 250));
+    if (macro?.source && macro.as_of) {
+      const macroAge = Math.max(0, Math.floor((now - macro.as_of) / 60_000));
+      lines.push("تقویم اقتصادی: " + macro.source + "، " + macroAge + " دقیقه قبل");
+    } else {
+      lines.push("تقویم اقتصادی: هنوز ثبت نشده");
+    }
+    return lines.join("\n");
+  } catch (error) {
+    return "وضعیت داده بازار قابل خواندن نیست: " + (error instanceof Error ? error.message : "خطای پایگاه داده");
+  }
+}
+
 async function refreshMacroCalendar(env: Env): Promise<void> {
   if (!env.DB) return;
   try {
@@ -243,7 +292,8 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     const latest = env.DB ? await latestAnalysis(env.DB) : null;
     let verdict: string | undefined;
     try { verdict = latest ? (JSON.parse(latest.payload_json) as AnalysisResult).verdict : undefined; } catch { verdict = "خطا در خواندن آخرین تحلیل"; }
-    await sendTelegram(env, formatStatus(risk, verdict));
+    const feedStatus = await formatMarketFeedStatus(env);
+    await sendTelegram(env, formatStatus(risk, verdict) + "\\n\\n" + feedStatus);
   } else if (text === "/analyze") {
     try { await refreshMarketData(env); await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
     catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
