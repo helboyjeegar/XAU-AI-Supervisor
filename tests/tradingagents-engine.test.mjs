@@ -69,7 +69,7 @@ function mockAi(options = {}) {
 
 test("runs isolated Macro, Quant, Risk and coordinator stages with traceable evidence", async () => {
   const { ai, calls } = mockAi();
-  const run = await runTradingAgentsResearch(input(), ai, true);
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "BUY", JSON.stringify({ blockers: run.result.blockers, warnings: run.result.warnings, calls: calls.map((item) => item.role), reports: run.reports }));
   assert.equal(run.result.researchStatus, "COMPLETED");
   assert.equal(run.result.side, "BUY");
@@ -95,7 +95,7 @@ test("stale risk or macro preflight blocks the run before any inference", async 
   const { ai, calls } = mockAi();
   const run = await runTradingAgentsResearch(input({
     risk: { verified: false, locked: false, lossPercent: 0, maxDailyLossPercent: 5, updatedAt: now - 300_000 },
-  }), ai, true);
+  }), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "BLOCKED");
   assert.equal(calls.length, 0);
@@ -103,7 +103,7 @@ test("stale risk or macro preflight blocks the run before any inference", async 
 
 test("risk specialist veto prevents coordinator approval", async () => {
   const { ai, calls } = mockAi({ riskVeto: true });
-  const run = await runTradingAgentsResearch(input(), ai, true);
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.ok(run.result.blockers.some((item) => item.includes("vetoed")));
   assert.equal(calls.some((item) => item.role === "main_coordinator"), false);
@@ -111,7 +111,7 @@ test("risk specialist veto prevents coordinator approval", async () => {
 
 test("coordinator cannot reverse the Quant candidate direction", async () => {
   const { ai } = mockAi({ coordinatorSide: "SELL" });
-  const run = await runTradingAgentsResearch(input(), ai, true);
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "FAILED", JSON.stringify({ blockers: run.result.blockers, calls: run.result.agents }));
   assert.ok(run.result.blockers.some((item) => item.includes("تعارض")));
@@ -127,7 +127,7 @@ test("invalid specialist output fails closed before the coordinator stage", asyn
       blockers: [], warnings: [], unknowns: [], veto: false,
     }) };
   }};
-  const run = await runTradingAgentsResearch(input(), ai, true);
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "FAILED");
   assert.equal(calls, 2);
@@ -135,8 +135,26 @@ test("invalid specialist output fails closed before the coordinator stage", asyn
 
 test("model outage fails closed and never creates an alert candidate", async () => {
   const ai = { async run() { throw new Error("provider unavailable"); } };
-  const run = await runTradingAgentsResearch(input(), ai, true);
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "FAILED");
   assert.equal(run.result.entry, null);
+});
+
+
+test("daily budget denial blocks all model calls", async () => {
+  const { ai, calls } = mockAi();
+  let reservations = 0;
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => { reservations++; return false; });
+  assert.equal(reservations, 1);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.equal(calls.length, 0);
+});
+
+test("enabled engine fails closed when no daily budget guard is supplied", async () => {
+  const { ai, calls } = mockAi();
+  const run = await runTradingAgentsResearch(input(), ai, true);
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.equal(calls.length, 0);
 });
