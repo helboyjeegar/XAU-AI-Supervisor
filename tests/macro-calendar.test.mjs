@@ -4,6 +4,7 @@ import {
   parseBlsIcs,
   parseBlsScheduleHtml,
   parseXoomarCalendar,
+  parseShowMyTradesCalendar,
   parseBeaJson,
   parseFomcHtml,
   highImpactEventWithinBlock,

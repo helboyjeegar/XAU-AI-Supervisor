@@ -11,6 +11,7 @@ const BEA_URL = "https://apps.bea.gov/API/signup/release_dates.json";
 const FOMC_URL = "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm";
 const OFFICIAL_SOURCE = "official-us-macro-calendar-v1";
 const XOOMAR_SOURCE = "xoomar-us-calendar-v1";
+const SHOWMYTRADES_SOURCE = "showmytrades-us-calendar-v1";
 const XOOMAR_URL = "https://xoomar.com/api/markets/calendar";
 const REFRESH_INTERVAL_MS = 15 * 60_000;
 const MAX_SOURCE_AGE_MS = 60 * 24 * 60 * 60_000;
@@ -401,11 +402,60 @@ async function fetchXoomarCalendarEvents(now: number): Promise<XoomarCalendarRes
   return parseXoomarCalendar(raw, now);
 }
 
+
+export interface ShowMyTradesCalendarResult {
+  events: CalendarEvent[];
+  generatedAt: number;
+  serverTime: number;
+  tentativeCount: number;
+}
+
+export function parseShowMyTradesCalendar(raw: string, now = Date.now()): ShowMyTradesCalendarResult {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("ShowMyTrades calendar response is not valid JSON"); }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("ShowMyTrades calendar response has an invalid shape");
+  const envelope = parsed as Record<string, unknown>;
+  const serverTime = typeof envelope.server_time === "number" ? envelope.server_time * 1000 : NaN;
+  const generatedAt = typeof envelope.generated_at === "string" ? Date.parse(envelope.generated_at) : NaN;
+  if (!Number.isFinite(serverTime) || Math.abs(serverTime - now) > 2 * 60_000) throw new Error("ShowMyTrades server clock is missing or differs from Worker clock by more than 2 minutes");
+  if (!Number.isFinite(generatedAt) || generatedAt > now + 60_000 || now - generatedAt > 20 * 60_000) throw new Error("ShowMyTrades calendar body is missing or older than 20 minutes");
+  if (!Array.isArray(envelope.events)) throw new Error("ShowMyTrades events field is not an array");
+  const events: CalendarEvent[] = [];
+  let tentativeCount = 0;
+  for (const item of envelope.events) {
+    if (typeof item !== "object" || item === null) continue;
+    const event = item as Record<string, unknown>;
+    if (event.currency !== "USD" || event.impact !== "high" || typeof event.title !== "string") continue;
+    if (event.status === "tentative" || event.confidence === "sources_disagree") tentativeCount++;
+    const ts = typeof event.ts === "number" ? event.ts * 1000 : NaN;
+    const isoTime = typeof event.time === "string" ? Date.parse(event.time) : NaN;
+    if (!Number.isFinite(ts) || !Number.isFinite(isoTime) || Math.abs(ts - isoTime) > 60_000) continue;
+    if (ts < now - 6 * 60 * 60_000 || ts > now + 30 * 24 * 60 * 60_000) continue;
+    const title = event.title.trim();
+    if (!title) continue;
+    const normalized = title.toLowerCase();
+    const source: CalendarEvent["source"] =
+      /consumer price|producer price|employment situation|nonfarm|payroll|jobless claims|jolts|employment cost|productivity|real earnings|import price|export price/.test(normalized) ? "BLS" :
+      /gross domestic product|\bgdp\b|personal income|personal consumption|\bpce\b|trade balance/.test(normalized) ? "BEA" :
+      /fomc|federal reserve|fed funds|rate decision|monetary policy/.test(normalized) ? "FOMC" : "OTHER";
+    events.push({ at: ts, title, source });
+  }
+  if (!events.some((event) => event.at > now)) throw new Error("ShowMyTrades calendar has no upcoming high-impact USD events in the 30-day window");
+  return { events, generatedAt, serverTime, tentativeCount };
+}
+
 export function highImpactEventWithinBlock(events: CalendarEvent[], now: number, blockMinutes = 15): CalendarEvent | null {
   const window = blockMinutes * 60_000;
   return events
     .filter((event) => Math.abs(event.at - now) <= window)
     .sort((a, b) => Math.abs(a.at - now) - Math.abs(b.at - now))[0] ?? null;
+}
+
+
+async function fetchShowMyTradesCalendarEvents(now: number): Promise<ShowMyTradesCalendarResult> {
+  const url = "https://showmytrades.com/api/public/calendar/v1?currency=USD&impact=high&days=30";
+  const raw = await fetchText(url, "application/json");
+  return parseShowMyTradesCalendar(raw, now);
 }
 
 export async function syncOfficialMacroCalendar(
@@ -414,7 +464,7 @@ export async function syncOfficialMacroCalendar(
   now = Date.now(),
 ): Promise<boolean> {
   if (
-    (current?.source === OFFICIAL_SOURCE || current?.source === XOOMAR_SOURCE) &&
+    (current?.source === OFFICIAL_SOURCE || current?.source === XOOMAR_SOURCE || current?.source === SHOWMYTRADES_SOURCE) &&
     current.asOf &&
     now - current.asOf < REFRESH_INTERVAL_MS
   ) {
@@ -457,10 +507,20 @@ export async function syncOfficialMacroCalendar(
         "محدودیت: این منبع تجمیعی ممکن است تغییر برنامه سازمان‌ها را با تأخیر منعکس کند.";
     } catch (fallbackError) {
       const fallbackDetail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      throw new Error(
-        "Official macro calendars failed: " + officialDetail +
-        " | XOOMAR fallback failed: " + fallbackDetail,
-      );
+      try {
+        const alternate = await fetchShowMyTradesCalendarEvents(now);
+        events = alternate.events;
+        source = SHOWMYTRADES_SOURCE;
+        sourceNote =
+          "تقویم جایگزین ShowMyTrades برای رویدادهای پراثر USD؛ زمان تولید داده: " +
+          new Date(alternate.generatedAt).toISOString() +
+          ". منبع تجمیعی مستقل است، نه فید رسمی مستقیم؛ رویدادهای دارای اختلاف منابع نیز جداگانه شمرده شده‌اند. " +
+          "Data: ShowMyTrades — https://showmytrades.com/tools/economic-calendar. پوشش این منبع ۳۰ روز آینده است.";
+        if (alternate.tentativeCount > 0) sourceNote += " تعداد رویدادهای دارای زمان‌بندی موقت/اختلاف منابع: " + alternate.tentativeCount + ".";
+      } catch (alternateError) {
+        const alternateDetail = alternateError instanceof Error ? alternateError.message : String(alternateError);
+        throw new Error("Official macro calendars failed: " + officialDetail + " | XOOMAR fallback failed: " + fallbackDetail + " | ShowMyTrades fallback failed: " + alternateDetail);
+      }
     }
   }
 
@@ -476,7 +536,7 @@ export async function syncOfficialMacroCalendar(
         ". " + sourceNote + " جهت DXY و بازده اوراق هنوز متصل نیست."
       : sourceNote + " جهت DXY و بازده اوراق هنوز متصل نیست.";
 
-  const coverageMinutes = 120 * 24 * 60;
+  const coverageMinutes = source === SHOWMYTRADES_SOURCE ? 30 * 24 * 60 : 120 * 24 * 60;
   const highImpactEventWithinMinutes = active ? 0 : null;
   await db.prepare(
     "INSERT INTO macro_context (id, as_of, source, calendar_coverage_minutes, high_impact_event_within_minutes, dxy_trend, us10y_trend, note) " +
