@@ -324,6 +324,8 @@ export interface XoomarCalendarResult {
   attribution: string;
 }
 
+// XOOMAR documents that agency schedule changes can take up to one week to appear.
+// Keep one extra day for weekends/processing, but never accept a calendar older than 8 days.
 export function parseXoomarCalendar(raw: string, now = Date.now()): XoomarCalendarResult {
   let parsed: unknown;
   try {
@@ -341,9 +343,9 @@ export function parseXoomarCalendar(raw: string, now = Date.now()): XoomarCalend
   if (
     !Number.isFinite(updatedAt) ||
     updatedAt > now + 5 * 60_000 ||
-    now - updatedAt > 48 * 60 * 60_000
+    now - updatedAt > 8 * 24 * 60 * 60_000
   ) {
-    throw new Error("XOOMAR calendar updatedAt is missing, future-dated or older than 48 hours");
+    throw new Error("XOOMAR calendar updatedAt is missing, future-dated or older than 8 days");
   }
 
   const meta = typeof envelope.meta === "object" && envelope.meta !== null
