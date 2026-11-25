@@ -232,11 +232,13 @@ async function fetchBlsEvents(now: number): Promise<CalendarEvent[]> {
     }
   }));
 
-  const events = pages.flat();
-  if (events.length === 0) {
-    throw new Error("All official BLS calendar endpoints failed: " + failures.join(" | "));
+  if (pages.some((events) => events.length === 0)) {
+    throw new Error(
+      "Both current-year and next-year official BLS schedules are required for complete forward coverage: " +
+      failures.join(" | "),
+    );
   }
-  return events;
+  return pages.flat();
 }
 
 export function parseBeaJson(raw: string, now = Date.now()): CalendarEvent[] {
@@ -358,7 +360,7 @@ export async function syncOfficialMacroCalendar(
       : "تقویم‌های رسمی BLS، BEA و Federal Reserve بررسی شده‌اند؛ رویداد زمان‌دار بعدی پیدا نشد. جهت DXY و بازده اوراق هنوز متصل نیست.";
 
   const source = OFFICIAL_SOURCE;
-  const coverageMinutes = 7 * 24 * 60;
+  const coverageMinutes = 120 * 24 * 60;
   const highImpactEventWithinMinutes = active ? 0 : null;
   await db.prepare(
     "INSERT INTO macro_context (id, as_of, source, calendar_coverage_minutes, high_impact_event_within_minutes, dxy_trend, us10y_trend, note) " +
