@@ -1,4 +1,5 @@
 import { analyzeMarket } from "./analysis.ts";
+import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
 import { challengeCandidate } from "./ai-challenger.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, sendTelegram } from "./telegram.ts";
@@ -52,6 +53,18 @@ async function readRisk(env: Env): Promise<RiskStatus> {
   const dayKey = tradingDayKey(env.RISK_TIMEZONE ?? "UTC");
   if (!env.DB) return { verified: false, locked: false, lossPercent: 0, maxDailyLossPercent: setting(env.MAX_DAILY_LOSS_PERCENT, 5), dayKey };
   return readRiskStatus(env.DB, dayKey, setting(env.MAX_DAILY_LOSS_PERCENT, 5), Date.now(), setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000);
+}
+
+async function refreshMacroCalendar(env: Env): Promise<void> {
+  if (!env.DB) return;
+  try {
+    const current = await latestMacroContext(env.DB);
+    await syncOfficialMacroCalendar(env.DB, current, Date.now());
+  } catch (error) {
+    // Do not replace a previously valid calendar snapshot with partial or failed data.
+    // Once the stored snapshot becomes stale, the analysis pipeline fails closed.
+    console.error("Official macro calendar refresh failed", error);
+  }
 }
 
 async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
@@ -216,7 +229,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     try { verdict = latest ? (JSON.parse(latest.payload_json) as AnalysisResult).verdict : undefined; } catch { verdict = "خطا در خواندن آخرین تحلیل"; }
     await sendTelegram(env, formatStatus(risk, verdict));
   } else if (text === "/analyze") {
-    try { const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
+    try { await refreshMacroCalendar(env); const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
     catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
   } else {
     await sendTelegram(env, "دستور شناخته نشد. /help را بفرست.");
@@ -294,6 +307,7 @@ export default {
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
         } else {
+          await refreshMacroCalendar(env);
           await runAnalysis(env);
         }
       } catch (error) {
