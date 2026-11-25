@@ -174,3 +174,18 @@ test("enabled engine fails closed when no daily budget guard is supplied", async
   assert.equal(run.result.researchStatus, "BLOCKED");
   assert.equal(calls.length, 0);
 });
+
+test("oversized AI input is rejected before inference", async () => {
+  const { ai, calls } = mockAi();
+  const run = await runTradingAgentsResearch(input({
+    macro: {
+      source: "test-calendar", asOf: now - 60_000,
+      calendarCoverageMinutes: 180, highImpactEventWithinMinutes: null,
+      note: "x".repeat(21_000),
+    },
+  }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "FAILED");
+  assert.equal(calls.length, 0);
+  assert.ok(run.result.blockers.some((item) => item.includes("کامل نشد")));
+});
