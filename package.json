@@ -1,0 +1,20 @@
+{
+  "name": "xau-ai-supervisor",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "check": "npm run typecheck && npm test",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply xau-ai-supervisor --local",
+    "db:migrate:remote": "wrangler d1 migrations apply xau-ai-supervisor --remote"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261124.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.167.0"
+  }
+}

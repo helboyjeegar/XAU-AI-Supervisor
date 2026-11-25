@@ -1,0 +1,37 @@
+name: Deploy Cloudflare Worker
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xau-ai-supervisor-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: f81155bdfd40ce84a8127b091e151bf9
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Run typecheck and tests
+        run: npm run check
+      - name: Deploy Worker
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        run: npx wrangler deploy
+      - name: Explain missing deployment credential
+        if: ${{ env.CLOUDFLARE_API_TOKEN == '' }}
+        run: echo "Deployment skipped. Add CLOUDFLARE_API_TOKEN in GitHub repository Actions secrets to enable automatic deployment."
