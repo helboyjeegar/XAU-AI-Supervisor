@@ -17,6 +17,7 @@ An XAU/USD research, risk-supervision and simulated paper-trading service. The a
 - Telegram notifications with a 15-minute same-direction alert cooldown and `/status`, `/analyze`, `/help` commands.
 - Deterministic XAUUSD Paper Trading using the same 1m entry / 5m+30m alignment principle, fixed 0.01-lot simulation, ATR stop, 1.8R target, one open position at a time, 5% virtual daily drawdown lock, and D1 trade ledger.
 - Automatic previous-UTC-day P/L report to Telegram at 00:05 UTC; paper equity and trades are separate from the prop-account risk snapshot.
+- Separate monthly Paper backtest using the exact current deterministic EMA20/50 + RSI14 + ATR14 entry/exit rules, with a 180-day historical 1m candle backfill throttled to one SiftingIO request per 10 minutes outside London/New York sessions. Results are stored by month and available with Telegram `/backtest`.
 - Freshness validation for equity snapshots; an old or delayed equity update cannot authorize a trade.
 - Automatic event-time protection from official BLS/BEA/Federal Reserve schedules, with an attributed XOOMAR fallback when government endpoints are blocked. The fallback is limited to personal/internal use under its free terms; details and assumptions are in [docs/MACRO_CALENDAR_FA.md](docs/MACRO_CALENDAR_FA.md).
 - Optional Cloudflare Workers AI adversarial reviewer. It is disabled by default and can only veto a deterministic candidate; it cannot create or approve signals.
@@ -114,7 +115,7 @@ The architecture avoids a dedicated always-on server. Cloudflare Free is quota-l
 1. Verify SiftingIO entitlement, end-to-end 1m bars and derived 5m/30m candles in D1 after the user adds `SIFTING_API_KEY`.
 2. Add a trustworthy, user-approved equity/risk snapshot source; the market data API does not provide the user's account equity or prop-firm drawdown.
 3. Add timestamped DXY and US 10-year Treasury yield data; scheduled-event protection alone is not complete macro context.
-4. Backtest using the user's broker-specific XAUUSD history, spreads, slippage and session rules; prevent look-ahead bias.
+4. Compare the monthly Paper backtest against the forward Paper ledger; review data gaps, spread assumptions and look-ahead controls. The current backtest uses SiftingIO reference data and is not broker-specific.
 5. Paper trade, compare signals against the existing playbook, calibrate scores and risk vetoes.
 6. Calibrate and test the optional veto-only Workers AI reviewer; deterministic safety gates remain authoritative.
 
