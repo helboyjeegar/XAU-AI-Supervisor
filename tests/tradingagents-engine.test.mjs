@@ -36,7 +36,7 @@ function mockAi(options = {}) {
       const ids = (tool) => ev.filter((item) => item.tool === tool).map((item) => item.id);
       const response = (body) => ({ response: JSON.stringify(body) });
       if (user.role === "macro") return response({
-        direction: "NEUTRAL", summary: "The supplied calendar shows no near-term high-impact event.",
+        direction: options.macroDirection ?? "NEUTRAL", summary: "The supplied calendar shows no near-term high-impact event.",
         findings: [{ claim: "Calendar snapshot is available", evidenceIds: ids("macro_calendar") }],
         blockers: [], warnings: [], unknowns: ["DXY and US10Y are not connected"], veto: false,
       });
@@ -188,4 +188,13 @@ test("oversized AI input is rejected before inference", async () => {
   assert.equal(run.result.researchStatus, "FAILED");
   assert.equal(calls.length, 0);
   assert.ok(run.result.blockers.some((item) => item.includes("کامل نشد")));
+});
+
+test("opposing Macro and Quant conclusions block before coordinator approval", async () => {
+  const { ai, calls } = mockAi({ macroDirection: "BEARISH" });
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("Macro and Quant specialists have opposing")));
+  assert.equal(calls.some((item) => item.role === "main_coordinator"), false);
 });
