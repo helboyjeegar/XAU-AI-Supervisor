@@ -2,7 +2,7 @@ import { getTradingSessionStatus } from "./trading-sessions.ts";
 import { runTradingAgentsResearch } from "./tradingagents-engine.ts";
 import { saveResearchRun, latestResearchRun, deleteOldResearchRuns } from "./research-storage.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
-import { refreshSiftingMarketData } from "./market-feed.ts";
+import { refreshSiftingMarketData, resampleCandles } from "./market-feed.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, reserveAiRunBudget, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import { processPaperTrading, sendPaperDailyReport } from "./paper-trading.ts";
@@ -45,7 +45,7 @@ function normalizeSymbol(value: unknown): string | null {
   return ["XAUUSD", "GOLD"].includes(normalized) ? "XAUUSD" : null;
 }
 
-function validateCandles(value: unknown): { candles?: Candle[]; error?: string } {
+function validateCandles(value: unknown, timeframe: Timeframe): { candles?: Candle[]; error?: string } {
   if (!Array.isArray(value) || value.length < 1 || value.length > 200) return { error: "candles must contain 1 to 200 items" };
   const candles: Candle[] = [];
   let previousTime = 0;
@@ -55,7 +55,10 @@ function validateCandles(value: unknown): { candles?: Candle[]; error?: string }
     const numbers = [time, item.open, item.high, item.low, item.close, item.volume ?? 0];
     if (numbers.some((n) => typeof n !== "number" || !Number.isFinite(n))) return { error: "candle fields must be finite numbers or an ISO timestamp" };
     const [ts, open, high, low, close, volume] = numbers as number[];
-    if (ts <= previousTime || ts <= 0) return { error: "candles must be in ascending time order without duplicates" };
+    const intervalMs = timeframe === "1m" ? 60_000 : timeframe === "5m" ? 300_000 : 1_800_000;
+    if (!Number.isSafeInteger(ts) || ts <= previousTime || ts <= 0 || ts % intervalMs !== 0) {
+      return { error: "candle timestamps must be safe integer UTC bucket times aligned to the requested timeframe" };
+    }
     if (open <= 0 || high <= 0 || low <= 0 || close <= 0 || volume < 0 || high < Math.max(open, close, low) || low > Math.min(open, close, high)) return { error: "invalid OHLCV relationship or value" };
     candles.push({ time: ts, open, high, low, close, volume });
     previousTime = ts;
@@ -194,13 +197,32 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
       };
     }
   }
-  const [one, five, thirty, risk, storedMacro] = await Promise.all([
+  const [one, five, thirty, risk, storedMacro, feed] = await Promise.all([
     loadCandles(env.DB, "XAUUSD", "1m", 300),
     loadCandles(env.DB, "XAUUSD", "5m", 300),
     loadCandles(env.DB, "XAUUSD", "30m", 300),
     readRisk(env),
     latestMacroContext(env.DB),
+    env.DB.prepare("SELECT last_success_at,last_bar_at,last_error FROM market_feed_state WHERE provider='siftingio'")
+      .first<{last_success_at:number|null;last_bar_at:number|null;last_error:string|null}>(),
   ]);
+  const sameCandle = (actual: Candle | undefined, expected: Candle | undefined): boolean =>
+    Boolean(actual && expected && actual.time === expected.time &&
+      [actual.open, actual.high, actual.low, actual.close, actual.volume].every((value, index) => {
+        const reference = [expected.open, expected.high, expected.low, expected.close, expected.volume][index]!;
+        return Math.abs(value - reference) <= 1e-8;
+      }));
+  const expectedFive = resampleCandles(one, "5m").at(-1);
+  const expectedThirty = resampleCandles(one, "30m").at(-1);
+  const derivedTimeframesMatch =
+    sameCandle(five.at(-1), expectedFive) && sameCandle(thirty.at(-1), expectedThirty);
+  const feedVerified = Boolean(feed?.last_success_at && feed.last_error === null &&
+    now >= feed.last_success_at && now - feed.last_success_at <= 7 * 60_000 &&
+    feed.last_bar_at !== null && one.at(-1)?.time === feed.last_bar_at &&
+    derivedTimeframesMatch);
+  const marketDataSource = feedVerified
+    ? "SiftingIO XAUUSD reference feed (latest M1 bar and resampled M5/M30 bars matched)"
+    : "D1 candle store; market-data source attribution or timeframe resampling unverified";
   const execution = await runTradingAgentsResearch({
     oneMinute: one, fiveMinute: five, thirtyMinute: thirty, macro: storedMacro,
     risk, now, modelName: env.AI_MODEL || "@cf/google/gemma-4-26b-a4b-it",
@@ -209,7 +231,7 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     macroMaxAgeMinutes: setting(env.MACRO_MAX_AGE_MINUTES, 30),
     highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
     riskMaxAgeMs: setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
-    marketDataSource: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "D1 candle store; provider not recorded",
+    marketDataSource,
   }, env.AI, env.ENABLE_TRADINGAGENTS === "true", () => reserveAiRunBudget(
     env.DB!, tradingDayKey("UTC", new Date(now)),
     setting(env.TRADINGAGENTS_MAX_RUNS_PER_UTC_DAY, 8), now,
@@ -446,7 +468,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     const symbol = normalizeSymbol(body.symbol);
     const timeframe = body.timeframe;
     if (!symbol || !["1m", "5m", "30m"].includes(String(timeframe))) return json({ ok: false, error: "Only XAUUSD and timeframes 1m, 5m, 30m are supported" }, 422);
-    const checked = validateCandles(body.candles);
+    const checked = validateCandles(body.candles, timeframe as Timeframe);
     if (!checked.candles) return json({ ok: false, error: checked.error }, 422);
     const written = await storeCandles(env.DB, symbol, timeframe as Timeframe, checked.candles);
     return json({ ok: true, symbol, timeframe, received: written });

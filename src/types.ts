@@ -62,6 +62,10 @@ export interface AnalysisResult {
   id: string;
   symbol: "XAUUSD";
   generatedAt: number;
+  /** Feed attribution for the source of this research run's reference candles. */
+  marketDataSource?: string;
+  /** UTC time at which the latest completed 1m candle closed. */
+  entryReferenceAt?: number;
   verdict: Verdict;
   side: Direction;
   score: number;

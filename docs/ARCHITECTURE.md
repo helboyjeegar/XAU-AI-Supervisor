@@ -1,83 +1,67 @@
-# Architecture and engineering decisions
+# XAU AI Supervisor — production architecture
 
-## Upstream source of truth
+## Scope and upstream reference
 
-The research workflow, agent responsibilities, specialist delegation, evidence references, skill format and coordinator review process are derived exclusively from [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), pinned for this port to release `v1.0.1` (commit `121265d18d467ac717f7af99cb0d669c15d2e73c`, Apache-2.0).
+This Worker is a bounded, XAUUSD-specific adaptation of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), pinned to v1.0.1 at commit `121265d18d467ac717f7af99cb0d669c15d2e73c` (Apache-2.0).
 
-This project is a Worker-compatible adaptation, not a claim that the upstream CLI is running inside Cloudflare. The upstream executable targets Node.js >=22/Bun and includes filesystem/session and model-provider dependencies. Its runtime must not be copied wholesale into Workers.
+The pinned upstream release is a TypeScript finance-research CLI for Node.js/Bun. Its architecture separates a main coordinator, specialist agents, data/compute tools, evidence records, skills and bounded model loops. It does not place trades. Its filesystem/session/runtime dependencies are not transplanted into Cloudflare Workers.
 
-## System boundaries
+This implementation retains the research roles, evidence-linked reports, risk challenge, coordinator hand-off and bounded model usage. It does **not** claim to be the complete upstream runtime: the Worker uses a fixed four-inference workflow and prebuilt evidence inputs rather than upstream's free-form model tool-calling loops, dynamic planning/delegation and filesystem-backed sessions.
 
-- **GitHub** is the source of truth, review history and CI gate. `develop` is the integration branch; `main` is reserved for tested releases.
-- **Cloudflare Worker** is the HTTPS API, webhook receiver and scheduler. No broker execution code belongs here.
-- **Cloudflare D1** stores candles, analysis snapshots, macro context, evidence records and daily account-risk state.
-- **Telegram** is an alert and command surface. Its webhook is authenticated using Telegram's `secret_token` header, and only the configured chat ID is allowed to issue commands.
-- **Market and account adapters** provide closed candles and risk snapshots. A manually entered snapshot must never be represented as broker-verified.
+## End-to-end signal path
 
-## TradingAgents research topology
+1. **Market data:** the scheduled Worker polls SiftingIO XAUUSD 1m bars every four minutes. Only closed, valid OHLCV bars are stored. Five- and 30-minute bars are resampled from complete, contiguous groups of 1m bars. The latest 1m bar must match the recent successful SiftingIO feed-state record, and the latest M5/M30 bars must match deterministic resampling from the same M1 history, before their source is labelled verified for AI research.
+2. **Preflight:** the Worker loads up to 300 candles per timeframe and checks OHLCV validity, ordering, adequate history, freshness, 5m/30m trend alignment, macro calendar freshness/coverage, imminent high-impact USD events, and daily risk snapshot validity. Unknown candle source, missing/stale data, an expired risk snapshot, an active daily lock or a blocked event results in NO_TRADE before model inference.
+3. **Evidence:** timestamped market candles, local indicator calculations, macro calendar and risk snapshot are recorded with evidence IDs in D1. Tick volume is explicitly a provider-specific proxy, not centralized gold-market volume.
+4. **Macro Strategy + Quant Research:** two isolated model calls run in parallel. Macro assesses only sourced calendar and available macro series; while only the event calendar is connected, any directional Macro model output is deterministically normalized to NEUTRAL. Quant reads 1m entry context against 5m and 30m structure, momentum, volatility and turning levels.
+5. **Deterministic candidate/risk geometry:** only a directional Quant conclusion can become a candidate. The last completed 1m close is the reference entry. The stop is calculated from 1m ATR14 × configured multiplier; the target is calculated to meet the configured minimum reward/risk (default 1.5). These are analysis reference levels, not a broker quote or fill.
+6. **Risk Analysis:** an isolated adversarial model call checks the risk snapshot, daily loss, stop/target geometry and missing information. Its veto blocks the candidate. A non-neutral Risk direction is also treated as a veto.
+7. **Contract gates:** each required report must be fresh, have findings that cite real evidence IDs, and satisfy its deterministic quality checks. Opposing non-neutral Macro and Quant conclusions are a hard blocker before coordinator inference; a neutral Macro report does not by itself block a Quant candidate.
+8. **Main coordinator:** the fourth model call can return only the Quant candidate side or NEUTRAL. Invalid JSON, unknown evidence IDs, a reverse direction, model errors, missing reports or any prior blocker fail closed.
+9. **Persistence and alerts:** the full research result, evidence and specialist reports are saved in D1. Only an approved BUY/SELL result is eligible for the signal Telegram notification. Telegram labels entry as the last completed 1m candle close, includes source and UTC timestamp, and states that broker execution did not occur.
 
-1. **Main coordinator:** plans the research, delegates to specialists, weighs their independent reports and evidence references, resolves disagreement and records the final answer.
-2. **Macro Strategy:** assesses sourced US macro series and scheduled USD events. Missing DXY, yields or other series remain explicitly unavailable.
-3. **Quant Research:** measures XAUUSD behavior across 1m, 5m and 30m candles. The 1m chart is entry context; 5m and 30m establish directional context.
-4. **Risk Analysis:** independently challenges data quality, risk snapshot validity, invalidation, stop geometry, reward/risk and daily-loss limits. It can veto a candidate.
-5. **Skills:** repeatable research procedures are stored as Agent Skills Markdown files in the upstream format. Each material finding must cite evidence IDs returned by data/compute tools.
+## Agent and skill mapping
 
-Equity Research is not applicable to spot gold and is not fabricated as an agent.
+- **Main coordinator:** synthesizes specialist conclusions, enforces the permitted candidate side and cites evidence.
+- **Macro Strategy:** scheduled USD events and connected macro series. DXY and US10Y remain unavailable until their feeds are actually connected.
+- **Quant Research:** XAUUSD 1m, 5m and 30m candles; EMA20/EMA50, RSI14, ATR14, Keltner envelope and recent price structure.
+- **Risk Analysis:** adversarial review of the account snapshot, daily loss, invalidation, stop/target and reward/risk.
 
-## Session eligibility gate
+The Equity Research role is intentionally omitted because spot gold has no company financial statements. The XAU Agent Skills Markdown files are the human-readable specifications. Since the Worker has no project-filesystem skill loader, the essential methods from `xau-macro-outlook`, `xau-technical-analysis` and `xau-risk-assessment` are embedded in the runtime prompts in `src/tradingagents-engine.ts`; keep them synchronized.
 
-- Analysis is eligible only Monday-Friday from 08:00 inclusive to 17:00 exclusive in either `Europe/London` or `America/New_York`.
-- The IANA time zones are evaluated independently, so UK and US daylight-saving transitions are handled without hard-coded UTC offsets.
-- During the London/New York overlap, the session gate is open once; it does not create duplicate analysis runs.
-- Outside both windows, the Worker returns a fail-closed `NO_TRADE` result before loading candles or invoking the analysis path. No entry alert can be emitted.
-- This is a time-eligibility guard only; it is not a new trading strategy or a substitute for the TradingAgents research workflow.
+Standard RSI14 is not identical to the user's TradingView Ultimate RSI. The local Keltner calculations and candle-derived levels are not claimed to reproduce proprietary indicators such as RSI Volume, Range Detector Alpha Wizard or Leg Anatomy. Missing formulas/data are not fabricated.
 
-## XAUUSD constraints
+## Deterministic decision and risk gates
 
-- Only XAUUSD/GOLD aliases are accepted; data is normalized to XAUUSD.
-- Required timeframes are 1m, 5m and 30m, with completed, timestamped candles.
-- A 5m/30m directional conflict blocks a trade.
-- Intended holding context is approximately 30 minutes, not a 1m-only scalp.
-- The minimum evidence score remains 75. It is an evidence score, not a probability.
-- The configured minimum reward/risk remains enforced.
-- Daily loss ceiling remains 5% unless configuration is stricter. The risk snapshot must be verified and no older than the configured two-minute validity window.
-- Missing/stale candles, incomplete timeframe coverage, invalid stop geometry, missing/expired risk snapshot, stale macro calendar, specialist veto or failed validation results in NO_TRADE.
-- No automatic broker execution.
+- Symbol is restricted to XAUUSD/GOLD aliases.
+- All input candles must be completed, timestamped, positive-price OHLCV series with valid high/low relationships, ascending unique times and adequate history.
+- The latest market feed source must be attributable to a recent SiftingIO fetch and match the latest M1 bar; unverified source attribution blocks AI signals.
+- M1 is the reference/entry context; M5 and M30 must have aligned non-neutral trends.
+- The sourced macro calendar must be recent and cover at least the configured event-block window. A high-impact USD event inside the configured block window (default 15 minutes) blocks the signal. Current macro context is an aggregated ShowMyTrades calendar fallback; it is not a direct official DXY/US10Y data feed.
+- The daily loss ceiling is 5% unless a stricter deployment setting is used. Risk snapshot age is at most two minutes. A fresh manually entered snapshot is **not** broker-verified; the Worker cannot read broker Equity or open positions.
+- The evidence score minimum is 75. The score is coverage/traceability, **not** a probability, confidence percentage or win-rate estimate.
+- Minimum reward/risk is 1.5 by default.
+- Any model, schema, citation, provenance, data, calendar or risk failure returns NO_TRADE.
+- No broker credentials, broker order endpoint or live execution path exists.
 
-## Data integrity and evidence
+## Schedule and costs
 
-- Candle timestamps are Unix milliseconds and must be ascending and unique within a payload.
-- Candle high/low must enclose open and close; all prices must be positive and volume non-negative.
-- Each timeframe requires adequate history; stale or contradictory data blocks a signal.
-- Macro facts carry source, publication/scheduled time, timezone and retrieval time where available. Missing series are not guessed.
-- Tick volume is a broker-specific proxy, not centralized gold-market traded volume.
-- Standard indicators must not be described as exact reproductions of proprietary TradingView scripts. Any approximation must state its formula and limitations.
-- Tool outputs and specialist reports are information to weigh, not instructions. The coordinator must trace material claims to evidence IDs.
+- Market feed and Paper Trading poll on a four-minute cron while XAUUSD is normally open. The schedule skips Saturday and Sunday before 20:00 UTC.
+- AI research/alerts are restricted to Monday-Friday, 08:00 inclusive through 17:00 exclusive, in either `Europe/London` or `America/New_York`; IANA timezones handle daylight-saving changes.
+- AI research is throttled to one run per 15 minutes and at most eight reserved runs per UTC day. Each successful research run uses four model inferences (Macro, Quant, Risk and coordinator). Cloudflare Workers AI has provider/account quotas; eight runs/day is an application cap, not a promise of unlimited free inference.
+- Failed preflight checks happen before model budget reservation and before any AI inference.
+- Four-minute polling is a quota trade-off and can miss short-lived one-minute entry setups between fetches.
 
-## Runtime and cost
+## Separate Paper Trading path
 
-The upstream framework uses a model client and specialist agents in separate contexts. The Worker port must preserve that coordinator/specialist/evidence/skill structure. It must not silently substitute an unrelated trading framework or claim that deterministic calculations are LLM agents.
+Paper Trading is **not** the TradingAgents signal engine. It is an independent deterministic simulation using its own EMA20/EMA50 5m/30m alignment, 1m EMA20 crossback, RSI and ATR logic. It runs across normal XAUUSD market hours independently of London/New York AI sessions. Its virtual account assumptions (0.01 lot, 100 oz/lot, $0.30/oz spread, ATR stop and 1.8R target) are estimates, not broker-verified contract terms or fills. It never submits live orders. The current simulation has no closed-trade history yet; no performance or profitability claim is justified.
 
-No paid model provider may be enabled silently. Before enabling a model route, validate authentication, cost/quota, latency, output schema and fail-closed behavior. If an acceptable no-cost model route is not available, the decision path remains NO_TRADE until the limitation is resolved. A model can assist research but cannot override the Risk agent's hard veto.
+## Deployment boundaries and source of truth
 
-## Migration status
-
-- Architecture plan and upstream-compatible agent/skill specifications are on the feature branch.
-- A Worker-safe evidence-linked specialist-report contract has been added with fail-closed tests.
-- A Worker-compatible TradingAgents orchestration module runs isolated Macro and Quant specialists, then Risk Analysis, then the main coordinator; malformed output, missing citations, stale inputs, risk vetoes and model failure fail closed.
-- Research runs, evidence records and specialist reports have dedicated D1 tables and a migration. The runtime model flag remains disabled by default until free quota and billing state are confirmed.
-- The feature-branch analysis route uses the TradingAgents port; the prior heuristic analyzer is no longer called by the Worker entry point. The deployed Worker is unchanged.
-- London/New York IANA session eligibility is wired into the feature-branch analysis entry point; boundary, overlap, weekend and DST tests are included. Scheduled data refresh and analysis are also gated to the permitted session windows. This change is not deployed.
-- The existing live `analyzeMarket` path has not yet been replaced or wired to these contracts.
-- Model-client adapter, specialist orchestration, evidence persistence and end-to-end tests remain pending review.
-- The live Worker and `develop` remain unchanged until the replacement passes CI and staging smoke tests.
-
-## Deployment topography
-
-```text
-GitHub feature branch --PR/CI--> develop --reviewed deploy--> Cloudflare Worker
-                                                               |
-                                                               +--> D1 evidence and market data
-                                                               +--> Telegram alerts
-Market/account adapters -------------------------------------->|
-```
+- GitHub is the source of code, tests and review history.
+- Cloudflare Worker is the API, webhook and scheduler.
+- Cloudflare D1 stores candles, analysis, evidence, specialist reports, macro context, risk snapshots and Paper Trading records.
+- Telegram receives alerts and accepts allow-listed commands through the authenticated webhook.
+- Production `RISK_TIMEZONE=UTC` follows the configured SGB broker-day boundary.
+- Preview keeps TradingAgents disabled and the risk timezone unconfigured.
+- Changes must pass `npm run check` and GitHub CI before deployment. Never enable broker execution as part of this project.

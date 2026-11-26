@@ -36,7 +36,7 @@ function mockAi(options = {}) {
       const ids = (tool) => ev.filter((item) => item.tool === tool).map((item) => item.id);
       const response = (body) => ({ response: JSON.stringify(body) });
       if (user.role === "macro") return response({
-        direction: "NEUTRAL", summary: "The supplied calendar shows no near-term high-impact event.",
+        direction: options.macroDirection ?? "NEUTRAL", summary: "The supplied calendar shows no near-term high-impact event.",
         findings: [{ claim: "Calendar snapshot is available", evidenceIds: ids("macro_calendar") }],
         blockers: [], warnings: [], unknowns: ["DXY and US10Y are not connected"], veto: false,
       });
@@ -188,4 +188,46 @@ test("oversized AI input is rejected before inference", async () => {
   assert.equal(run.result.researchStatus, "FAILED");
   assert.equal(calls.length, 0);
   assert.ok(run.result.blockers.some((item) => item.includes("کامل نشد")));
+});
+
+test("opposing Macro and Quant conclusions block before coordinator approval", async () => {
+  const { ai, calls } = mockAi({ macroDirection: "BEARISH" });
+  const run = await runTradingAgentsResearch(input({
+    macro: { ...input().macro, dxyTrend: "BEARISH" },
+  }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("متخصصان Macro و Quant")));
+  assert.deepEqual(calls.map((item) => item.role), ["macro", "quant"]);
+});
+
+test("unverified candle provenance blocks before any model inference", async () => {
+  const { ai, calls } = mockAi();
+  const run = await runTradingAgentsResearch(input({
+    marketDataSource: "D1 candle store; market-data source attribution unverified",
+  }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("منبع داده کندل‌ها")));
+  assert.equal(calls.length, 0);
+});
+
+test("calendar-only Macro output cannot create a directional gold thesis", async () => {
+  const { ai, calls } = mockAi({ macroDirection: "BEARISH" });
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
+  assert.equal(run.result.verdict, "BUY");
+  assert.equal(run.reports[0].direction, "NEUTRAL");
+  assert.ok(run.reports[0].warnings.some((item) => item.includes("فقط تقویم رویدادها")));
+  assert.ok(calls.some((item) => item.role === "main_coordinator"));
+});
+
+test("candle timestamps must be integer UTC bucket opens aligned to each timeframe", async () => {
+  const { ai, calls } = mockAi();
+  const oneMinute = makeCandles(60_000);
+  oneMinute[40].time += 1;
+  const run = await runTradingAgentsResearch(input({ oneMinute }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("حداقل ۵۵ کندل معتبر")));
+  assert.equal(calls.length, 0);
 });
