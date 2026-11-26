@@ -2,7 +2,7 @@ import { getTradingSessionStatus } from "./trading-sessions.ts";
 import { runTradingAgentsResearch } from "./tradingagents-engine.ts";
 import { saveResearchRun, latestResearchRun, deleteOldResearchRuns } from "./research-storage.ts";
 import { syncOfficialMacroCalendar } from "./macro-calendar.ts";
-import { refreshSiftingMarketData } from "./market-feed.ts";
+import { refreshSiftingMarketData, resampleCandles } from "./market-feed.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, reserveAiRunBudget, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import { processPaperTrading, sendPaperDailyReport } from "./paper-trading.ts";
@@ -203,12 +203,23 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     env.DB.prepare("SELECT last_success_at,last_bar_at,last_error FROM market_feed_state WHERE provider='siftingio'")
       .first<{last_success_at:number|null;last_bar_at:number|null;last_error:string|null}>(),
   ]);
+  const sameCandle = (actual: Candle | undefined, expected: Candle | undefined): boolean =>
+    Boolean(actual && expected && actual.time === expected.time &&
+      [actual.open, actual.high, actual.low, actual.close, actual.volume].every((value, index) => {
+        const reference = [expected.open, expected.high, expected.low, expected.close, expected.volume][index]!;
+        return Math.abs(value - reference) <= 1e-8;
+      }));
+  const expectedFive = resampleCandles(one, "5m").at(-1);
+  const expectedThirty = resampleCandles(one, "30m").at(-1);
+  const derivedTimeframesMatch =
+    sameCandle(five.at(-1), expectedFive) && sameCandle(thirty.at(-1), expectedThirty);
   const feedVerified = Boolean(feed?.last_success_at && feed.last_error === null &&
     now >= feed.last_success_at && now - feed.last_success_at <= 7 * 60_000 &&
-    feed.last_bar_at !== null && one.at(-1)?.time === feed.last_bar_at);
+    feed.last_bar_at !== null && one.at(-1)?.time === feed.last_bar_at &&
+    derivedTimeframesMatch);
   const marketDataSource = feedVerified
-    ? "SiftingIO XAUUSD reference feed (latest M1 bar matched to feed state)"
-    : "D1 candle store; market-data source attribution unverified";
+    ? "SiftingIO XAUUSD reference feed (latest M1 bar and resampled M5/M30 bars matched)"
+    : "D1 candle store; market-data source attribution or timeframe resampling unverified";
   const execution = await runTradingAgentsResearch({
     oneMinute: one, fiveMinute: five, thirtyMinute: thirty, macro: storedMacro,
     risk, now, modelName: env.AI_MODEL || "@cf/google/gemma-4-26b-a4b-it",
