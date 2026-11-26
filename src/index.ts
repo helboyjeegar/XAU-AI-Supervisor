@@ -6,6 +6,8 @@ import { refreshSiftingMarketData, resampleCandles } from "./market-feed.ts";
 import { loadCandles, readRiskStatus, saveAnalysis, saveRiskSnapshot, storeCandles, tradingDayKey, reserveAiRunBudget, deleteOldCandles, deleteOldAnalyses, latestAnalysis, latestMacroContext, claimSignalNotification, releaseSignalNotification } from "./storage.ts";
 import { formatAnalysis, formatStatus, parseRiskCommand, sendTelegram } from "./telegram.ts";
 import { processPaperTrading, sendPaperDailyReport } from "./paper-trading.ts";
+import { runPaperBacktestMonth, getPaperBacktestResults } from "./paper-backtest.ts";
+import { backfillPaperHistory, getBackfillStatus } from "./paper-backtest-history.ts";
 import type { AnalysisResult, Candle, Env, MacroContext, RiskStatus, Timeframe } from "./types.ts";
 
 const json = (data: unknown, status = 200): Response => new Response(JSON.stringify(data, null, 2), {
@@ -439,6 +441,45 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       ].filter(Boolean);
       await sendTelegram(env,lines.join("\n"));
     }
+  } else if (command === "/backtest") {
+    if (!env.DB) {
+      await sendTelegram(env, "بک‌تست در دسترس نیست: پایگاه داده متصل نیست.");
+    } else {
+      const backfill = await getBackfillStatus(env.DB);
+      if (!backfill || !backfill.complete) {
+        const progress = backfill
+          ? "وضعیت: دریافت تاریخچه در حال انجام است. صفحات دریافت‌شده: " + backfill.pages +
+            "\\nشروع تاریخچه: " + new Date(backfill.startAt).toISOString() +
+            "\\nآخرین خطا: " + (backfill.lastError ?? "ندارد")
+          : "آرشیو تاریخی هنوز آغاز نشده؛ Worker در خارج از سشن‌های لندن/نیویورک آن را شروع می‌کند.";
+        await sendTelegram(env, "بک‌تست ماهانه هنوز آماده نیست.\\n" + progress +
+          "\\n\\nبرای رعایت سهمیه رایگان SiftingIO، دریافت تاریخچه با فاصله حداقل ۱۰ دقیقه بین درخواست‌ها انجام می‌شود.");
+      } else {
+        const months = await env.DB.prepare(`SELECT DISTINCT strftime('%Y-%m',ts/1000,'unixepoch') AS month
+          FROM market_candles WHERE symbol='XAUUSD' AND timeframe='1m' ORDER BY month DESC LIMIT 6`)
+          .all<{month:string}>();
+        const results = [];
+        for (const row of (months.results ?? []).reverse()) {
+          results.push(await runPaperBacktestMonth(env.DB, row.month, Date.now()));
+        }
+        const lines = [
+          "گزارش بک‌تست ماهانه Paper — XAU/USD",
+          "استراتژی: نسخه فعلی Paper (EMA20/50 + RSI14 + ATR14)",
+          ...results.map(r => [
+            r.month + (r.complete ? "" : " (ماه جاری، ناقص)"),
+            "خالص: " + (r.netPnl >= 0 ? "+" : "-") + "$" + Math.abs(r.netPnl).toFixed(2) +
+              " | بازده: " + (r.returnPercent >= 0 ? "+" : "") + r.returnPercent.toFixed(2) + "%",
+            "معامله: " + r.trades + " | برد: " + r.winRatePercent.toFixed(1) + "% | PF: " +
+              (r.profitFactor === null ? "بدون زیان" : r.profitFactor.toFixed(2)),
+            "افت سرمایه: " + r.maxDrawdownPercent.toFixed(2) + "% | کندل: " + r.candles +
+              " | گپ بیش از ۱ دقیقه: " + r.gapsOverOneMinute,
+          ].join("\\n")).join("\\n\\n"),
+          "سرمایه شروع هر ماه: $10,000؛ حجم 0.01 لات؛ اسپرد فرضی 0.30 دلار/اونس؛ بدون کمیسیون و اسلیپیج.",
+          "قیمت مرجع SiftingIO است. نتایج بک‌تست تضمین عملکرد آینده نیستند.",
+        ];
+        await sendTelegram(env, lines.join("\\n\\n"));
+      }
+    }
   } else if (command === "/analyze") {
     try {
       const inSession = getTradingSessionStatus(Date.now()).allowed;
@@ -531,7 +572,7 @@ export default {
         if (controller.cron === "5 0 * * *") {
           await sendPaperDailyReport(env);
         } else if (controller.cron === "0 2 * * *") {
-          const retention = Date.now() - 45 * 24 * 60 * 60 * 1000;
+          const retention = Date.now() - 400 * 24 * 60 * 60 * 1000;
           await deleteOldCandles(env.DB!, retention);
           await deleteOldAnalyses(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
           await deleteOldResearchRuns(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
