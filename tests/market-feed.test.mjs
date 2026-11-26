@@ -43,7 +43,7 @@ test("SiftingIO parser rejects wrong symbol, stale response, stale bars and bad 
     /response timestamp is missing or stale/,
   );
   assert.throws(
-    () => parseSiftingBars(base, Date.parse("2026-11-25T12:10:00.000Z")),
+    () => parseSiftingBars({ ...base, meta: { ...base.meta, as_of: "2026-11-25T12:11:50.000Z" } }, Date.parse("2026-11-25T12:12:00.000Z")),
     /Latest SiftingIO XAUUSD one-minute candle is stale/,
   );
   assert.throws(
@@ -61,6 +61,19 @@ test("SiftingIO parser rejects missing response metadata and incomplete-only pay
     meta: { symbol: "XAUUSD", interval: "1m", as_of: "2026-11-25T12:05:20.000Z" },
     data: [{ t: Date.parse("2026-11-25T12:05:00.000Z"), o: 1, h: 2, l: 1, c: 2, v: 1 }],
   }, now), /no completed XAUUSD one-minute candles/);
+});
+
+
+test("SiftingIO parser accepts a completed bar delayed by the four-minute polling cadence", () => {
+  const payload = {
+    meta: { symbol: "XAUUSD", interval: "1m", as_of: "2026-11-25T12:10:20.000Z" },
+    data: [
+      { t: Date.parse("2026-11-25T12:04:00.000Z"), o: 2650, h: 2652, l: 2649, c: 2651, v: 10 },
+    ],
+  };
+  const parsed = parseSiftingBars(payload, Date.parse("2026-11-25T12:10:30.000Z"));
+  assert.equal(parsed.candles.length, 1);
+  assert.equal(parsed.candles[0].time, Date.parse("2026-11-25T12:04:00.000Z"));
 });
 
 test("resampler creates accurate complete 5m and 30m OHLCV candles", () => {

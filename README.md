@@ -8,7 +8,7 @@ An XAU/USD research, risk-supervision and simulated paper-trading service. The a
 
 - Cloudflare Worker API with authenticated market-data and risk ingestion.
 - Default cloud-hosted XAUUSD data adapter via SiftingIO commodities REST API; no MT5 desktop or always-on user computer is required. The key is held only as a Cloudflare Worker secret.
-- 1m XAUUSD reference OHLCV is refreshed by the Worker every two minutes during the permitted London/New York sessions; complete 5m and 30m candles are resampled from the 1m bars. This is a two-minute polling cadence over one-minute candles, not continuous one-minute monitoring.
+- 1m XAUUSD reference OHLCV is refreshed by the Worker every four minutes throughout the normal gold market week; complete 5m and 30m candles are resampled from the 1m bars. This is four-minute polling over one-minute candles, not continuous one-minute monitoring. The paper engine replays every newly received closed 1m bar for stop/target handling, while new entries are considered only on the newest bar.
 - D1 persistence for OHLCV candles, analysis decisions, daily risk state and macro context.
 - Four specialist modules: Gold Technical Analyst, Quant Research, Macro Strategy and Risk Analysis; a deterministic supervisor combines their findings.
 - 1m entry analysis with 5m and 30m trend context.
@@ -28,7 +28,7 @@ The score is an **evidence score, not a statistically calibrated probability**. 
 ## Runtime architecture
 
 ```text
-SiftingIO XAUUSD REST feed (every 2m in allowed sessions)
+SiftingIO XAUUSD REST feed (every 4m during the gold market week)
                      |
                      v
               Cloudflare Worker
@@ -107,7 +107,7 @@ Workers AI calls are bounded by an atomic maximum of 8 research runs per UTC quo
 
 ## Free-tier expectations
 
-The architecture avoids a dedicated always-on server. Cloudflare Free is quota-limited, not unlimited: Workers, D1 and Workers AI each have usage ceilings. The current release does not require a paid LLM API. The optional Workers AI reviewer is disabled by default; its free-plan availability is quota-limited and is not an unlimited inference service. A reliable live economic calendar, gold price feed, or AI model may have separate quotas or paid tiers; no provider is represented as unlimited-free. The default SiftingIO Commodities free tier currently includes 10,000 REST requests/month, no card, one WebSocket connection and five symbol subscriptions. The Worker checks every two minutes only during the combined London/New York weekday session window (up to about 14 hours/day). At that upper bound, the feed can use roughly 9,240 requests in a 22-business-day month or 9,660 in a 23-business-day month, close to the 10,000-request free allowance; manual `/analyze` calls can add requests. If the provider quota is reached, data refresh fails closed rather than switching to a paid provider. This provider's XAUUSD price is an aggregated spot/reference value, not the user's broker quote; its `v` field is tick-count volume, not exchange-traded volume. Its free tier is for personal/internal non-commercial use and is best-effort without an uptime SLA. The default system therefore remains analysis-and-alerts-only and should not be used as an execution-price feed. Details: [SiftingIO Free Commodities](https://sifting.io/free-market-data-api), [XAUUSD reference](https://sifting.io/symbols/commodities/XAUUSD), [OHLCV API](https://sifting.io/docs/historical/commodities).
+The architecture avoids a dedicated always-on server. Cloudflare Free is quota-limited, not unlimited: Workers, D1 and Workers AI each have usage ceilings. The current release does not require a paid LLM API. The optional Workers AI reviewer is disabled by default; its free-plan availability is quota-limited and is not an unlimited inference service. A reliable live economic calendar, gold price feed, or AI model may have separate quotas or paid tiers; no provider is represented as unlimited-free. The default SiftingIO Commodities free tier currently includes 10,000 REST requests/month, no card, one WebSocket connection and five symbol subscriptions. The Worker checks every four minutes during the normal gold market week (weekdays plus Sunday evening UTC). This is roughly 7,800–8,000 REST calls in a typical month, before manual diagnostic or analysis requests, leaving some headroom under the 10,000-request free allowance. If the provider quota is reached, data refresh fails closed rather than switching to a paid provider. This provider's XAUUSD price is an aggregated spot/reference value, not the user's broker quote; its `v` field is tick-count volume, not exchange-traded volume. Its free tier is for personal/internal non-commercial use and is best-effort without an uptime SLA. The default system therefore remains analysis-and-alerts-only and should not be used as an execution-price feed. Details: [SiftingIO Free Commodities](https://sifting.io/free-market-data-api), [XAUUSD reference](https://sifting.io/symbols/commodities/XAUUSD), [OHLCV API](https://sifting.io/docs/historical/commodities).
 
 ## Roadmap
 

@@ -11,6 +11,9 @@ const STOP_ATR = 1.2;
 const TARGET_R = 1.8;
 const MAX_DAILY_DD = 5;
 const MS = { "1m": 60_000, "5m": 300_000, "30m": 1_800_000 } as const;
+const MAX_M1_AGE_MS = 6 * MS["1m"];
+const MAX_M5_AGE_MS = 10 * MS["1m"];
+const MAX_M30_AGE_MS = 36 * MS["1m"];
 
 function ema(values: number[], period: number): number | null {
   if (values.length < period) return null;
@@ -92,13 +95,14 @@ async function closeOpen(db: D1Database, candle: Candle): Promise<void> {
     ]);
   }
 }
-async function maybeOpen(db: D1Database, now: number): Promise<string | null> {
+async function maybeOpen(db: D1Database, now: number, allowEntry: boolean): Promise<string | null> {
+  if (!allowEntry) return null;
   const [one,five,thirty] = await Promise.all([
     loadCandles(db,"XAUUSD","1m",80),loadCandles(db,"XAUUSD","5m",80),loadCandles(db,"XAUUSD","30m",80)
   ]);
   if (one.length<55 || five.length<55 || thirty.length<55) return null;
   const last=one.at(-1)!, prev=one.at(-2)!;
-  if (now-(last.time+MS["1m"])>180_000 || now-(five.at(-1)!.time+MS["5m"])>420_000 || now-(thirty.at(-1)!.time+MS["30m"])>1_920_000) return null;
+  if (now-(last.time+MS["1m"])>MAX_M1_AGE_MS || now-(five.at(-1)!.time+MS["5m"])>MAX_M5_AGE_MS || now-(thirty.at(-1)!.time+MS["30m"])>MAX_M30_AGE_MS) return null;
   const side5=trend(five), side30=trend(thirty);
   if (!side5 || side5!==side30) return null;
   const closes=one.map(c=>c.close), prevEma=ema(closes.slice(0,-1),20), currentEma=ema(closes,20);
@@ -110,7 +114,7 @@ async function maybeOpen(db: D1Database, now: number): Promise<string | null> {
   const state=await db.prepare("SELECT * FROM paper_state WHERE id=1").first<{
     balance:number;equity:number;daily_start_equity:number;day_key:string;daily_locked:number;last_processed_bar:number;
   }>();
-  if (!state || state.daily_locked===1 || last.time<=state.last_processed_bar) return null;
+  if (!state || state.daily_locked===1) return null;
   if ((await db.prepare("SELECT id FROM paper_positions WHERE status='OPEN' LIMIT 1").first())) return null;
   const day=utcDay(now);
   if (state.day_key!==day) await db.prepare("UPDATE paper_state SET day_key=?,daily_start_equity=equity,daily_locked=0 WHERE id=1").bind(day).run();
@@ -132,17 +136,58 @@ async function maybeOpen(db: D1Database, now: number): Promise<string | null> {
 }
 export async function processPaperTrading(env: Env, now=Date.now()): Promise<void> {
   if (!env.DB || !env.SIFTING_API_KEY) return;
-  await ensureState(env.DB,now);
-  const last=(await loadCandles(env.DB,"XAUUSD","1m",1))[0];
-  if (!last || now-(last.time+MS["1m"])>180_000) return;
-  await closeOpen(env.DB,last);
-  await updateEquity(env.DB,now);
-  const day = utcDay(now);
-  const state = await env.DB.prepare("SELECT day_key,equity FROM paper_state WHERE id=1").first<{day_key:string;equity:number}>();
-  if (state && state.day_key !== day) {
-    await env.DB.prepare("UPDATE paper_state SET day_key=?,daily_start_equity=equity,daily_locked=0,updated_at=? WHERE id=1").bind(day,now).run();
+  const db = env.DB;
+  await ensureState(db,now);
+  const last=(await loadCandles(db,"XAUUSD","1m",1))[0];
+  if (!last || now-(last.time+MS["1m"])>MAX_M1_AGE_MS) return;
+
+  const state = await db.prepare(
+    "SELECT last_processed_bar FROM paper_state WHERE id=1",
+  ).first<{last_processed_bar:number}>();
+  if (!state) return;
+
+  // On first activation, establish a clean watermark instead of replaying old history.
+  if (state.last_processed_bar === 0) {
+    await db.prepare("UPDATE paper_state SET last_processed_bar=?,updated_at=? WHERE id=1")
+      .bind(last.time,now).run();
+    await updateEquity(db,now);
+    return;
   }
-  const alert=await maybeOpen(env.DB,now);
+
+  const pending = await db.prepare(
+    `SELECT ts AS time,open,high,low,close,volume FROM market_candles
+     WHERE symbol='XAUUSD' AND timeframe='1m' AND ts>? AND ts<=?
+     ORDER BY ts ASC LIMIT 2000`,
+  ).bind(state.last_processed_bar,last.time).all<Candle>();
+  const candles = pending.results ?? [];
+  if (candles.length === 0) {
+    await updateEquity(db,now);
+    return;
+  }
+
+  // Process every newly available minute in order so a 4-minute polling cadence
+  // cannot skip a stop-loss or take-profit touched between scheduled runs.
+  for (const candle of candles) {
+    await closeOpen(db,candle);
+    await db.prepare("UPDATE paper_state SET last_processed_bar=?,updated_at=? WHERE id=1")
+      .bind(candle.time,now).run();
+  }
+
+  await updateEquity(db,now);
+  const day = utcDay(now);
+  const dayState = await db.prepare("SELECT day_key,equity FROM paper_state WHERE id=1")
+    .first<{day_key:string;equity:number}>();
+  if (dayState && dayState.day_key !== day) {
+    await db.prepare("UPDATE paper_state SET day_key=?,daily_start_equity=equity,daily_locked=0,updated_at=? WHERE id=1")
+      .bind(day,now).run();
+  }
+
+  // Only consider a new entry when the newest closed candle was processed in this run.
+  // Older missed candles are used for exits, never for retrospective entries.
+  const caughtUp = candles.at(-1)!.time === last.time;
+  const alert = await maybeOpen(db,now,caughtUp);
+  await db.prepare("UPDATE paper_state SET last_processed_bar=MAX(last_processed_bar,?),updated_at=? WHERE id=1")
+    .bind(last.time,now).run();
   if (alert) await sendTelegram(env,alert);
 }
 export async function sendPaperDailyReport(env: Env, now=Date.now()): Promise<void> {
