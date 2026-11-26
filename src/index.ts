@@ -584,6 +584,10 @@ export default {
           const utcDay = now.getUTCDay();
           const utcHour = now.getUTCHours();
           if (utcDay === 6 || (utcDay === 0 && utcHour < 20)) return;
+          if (!getTradingSessionStatus(Date.now()).allowed && env.SIFTING_API_KEY) {
+            try { await backfillPaperHistory(env.DB!, env.SIFTING_API_KEY, Date.now()); }
+            catch (error) { console.error("Paper history backfill failed", error); }
+          }
           await refreshMarketData(env);
           await processPaperTrading(env);
           // Keep the AI research/alert engine restricted to its configured London/New York sessions.
