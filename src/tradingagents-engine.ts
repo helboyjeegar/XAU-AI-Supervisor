@@ -284,10 +284,21 @@ export async function runTradingAgentsResearch(
     const quantParsed = specialist(quantRaw, "quant", ids, input.now);
     if (!macroParsed || !quantParsed) return noTrade(runId, input.now,
       ["خروجی Macro یا Quant با قرارداد خروجی معتبر مطابقت نداشت."], commonWarnings, evidence, reports, "FAILED", checks);
-    const macroReport: SpecialistReport = { ...macroParsed, macroQuality: {
-      calendarFresh: checks.macroFresh,
-      coverageMinutes: input.macro?.calendarCoverageMinutes ?? 0,
-    }};
+    const macroHasDirectionalSeries =
+      input.macro?.dxyTrend !== undefined || input.macro?.us10yTrend !== undefined;
+    const macroReport: SpecialistReport = {
+      ...macroParsed,
+      // A calendar-only feed provides event risk, not a defensible directional gold view.
+      direction: macroHasDirectionalSeries ? macroParsed.direction : "NEUTRAL",
+      warnings: macroHasDirectionalSeries ? macroParsed.warnings : [
+        ...macroParsed.warnings,
+        "فقط تقویم رویدادها متصل است؛ چون DXY و US10Y موجود نیستند، جهت‌گیری قیمتی Macro خنثی در نظر گرفته شد.",
+      ],
+      macroQuality: {
+        calendarFresh: checks.macroFresh,
+        coverageMinutes: input.macro?.calendarCoverageMinutes ?? 0,
+      },
+    };
     const quantReport: SpecialistReport = { ...quantParsed, dataQuality: {
       candlesComplete: checks.candlesComplete,
       candlesFresh: checks.candlesFresh,
