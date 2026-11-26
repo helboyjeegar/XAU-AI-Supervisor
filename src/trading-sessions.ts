@@ -52,3 +52,13 @@ export function getTradingSessionStatus(timestampMs: number): TradingSessionStat
 
   return { allowed: sessions.length > 0, sessions, checkedAt: timestampMs };
 }
+
+/** Feed cadence: 1m in the London/New York overlap, 4m in either individual
+ * session, and 6m outside sessions only while a paper position needs exit monitoring.
+ */
+export function getFeedPollIntervalMs(timestampMs: number, hasOpenPosition: boolean): number | null {
+  const status = getTradingSessionStatus(timestampMs);
+  if (status.sessions.length === 2) return 60_000;
+  if (status.sessions.length === 1) return 4 * 60_000;
+  return hasOpenPosition ? 6 * 60_000 : null;
+}
