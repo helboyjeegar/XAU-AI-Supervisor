@@ -175,7 +175,10 @@ function noTrade(runId: string, now: number, blockers: string[], warnings: strin
   checks: Checks): TradingAgentsExecution {
   return { runId, evidence, reports, result: {
     id: runId, researchRunId: runId, researchStatus: status, evidenceIds: evidence.map((e) => e.id),
-    symbol: "XAUUSD", generatedAt: now, verdict: "NO_TRADE", side: "NEUTRAL",
+    symbol: "XAUUSD", generatedAt: now,
+    marketDataSource: evidence.find((item) => item.tool === "market_candles")?.source,
+    entryReferenceAt: checks.snapshots["1m"] ? checks.snapshots["1m"]!.candleTime + DURATIONS["1m"] : undefined,
+    verdict: "NO_TRADE", side: "NEUTRAL",
     score: 0, scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY", entry: null, stopLoss: null,
     takeProfit: null, riskReward: null, reasons: [], blockers: [...new Set(blockers)],
     warnings: [...new Set(warnings)], agents: reports.map((r) => agentFinding(
@@ -352,6 +355,8 @@ export async function runTradingAgentsResearch(
     const result: AnalysisResult = {
       id: runId, researchRunId: runId, researchStatus: "COMPLETED",
       evidenceIds: evidence.map((e) => e.id), symbol: "XAUUSD", generatedAt: input.now,
+      marketDataSource: input.marketDataSource,
+      entryReferenceAt: one.candleTime + DURATIONS["1m"],
       verdict, side, score: evidenceScore, scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY",
       entry: side === "NEUTRAL" ? null : geometry.entry,
       stopLoss: side === "NEUTRAL" ? null : geometry.stopLoss,
