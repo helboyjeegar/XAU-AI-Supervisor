@@ -406,20 +406,20 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
         "Peak Equity: $" + (state?.peak_equity ?? 10000).toFixed(2),
         "قفل افت روزانه ۵٪: " + (state?.daily_locked ? "فعال" : "غیرفعال"),
         "ساعت فعالیت: تمام ساعات باز بودن بازار طلا؛ مستقل از سشن لندن/نیویورک",
-        open ? ["معامله باز: " + open.side + " | " + open.lots.toFixed(2) + " لات","ورود: " + open.entry_price.toFixed(2) + " | SL: " + open.stop_loss.toFixed(2) + " | TP: " + open.take_profit.toFixed(2),"زمان ورود: " + new Date(open.opened_at).toISOString()].join("\\n") : "معامله باز: ندارد",
+        open ? ["معامله باز: " + open.side + " | " + open.lots.toFixed(2) + " لات","ورود: " + open.entry_price.toFixed(2) + " | SL: " + open.stop_loss.toFixed(2) + " | TP: " + open.take_profit.toFixed(2),"زمان ورود: " + new Date(open.opened_at).toISOString()].join("\n") : "معامله باز: ندارد",
         "۵ نتیجه بسته‌شده اخیر:",
         ...(closed.results ?? []).map(t => (t.net_pnl >= 0 ? "+" : "-") + "$" + Math.abs(t.net_pnl).toFixed(2) + " | " + t.side + " | " + t.entry_price.toFixed(2) + " → " + t.exit_price.toFixed(2) + " | " + t.close_reason),
         "آخرین دریافت بازار: " + (feed?.last_success_at ? new Date(feed.last_success_at).toISOString() : "ثبت نشده"),
         feed?.last_error ? "خطای فید: " + feed.last_error : "",
       ].filter(Boolean);
-      await sendTelegram(env,lines.join("\\n"));
+      await sendTelegram(env,lines.join("\n"));
     }
   } else if (command === "/analyze") {
     try {
       const inSession = getTradingSessionStatus(Date.now()).allowed;
       if (inSession) { await refreshMarketData(env); await refreshMacroCalendar(env); }
       const result = await runAnalysis(env, false);
-      const explanation = inSession ? "" : "\\n\\nیادآوری: محدودیت سشن فقط برای تحلیل AI است. Paper Trading در ساعات باز بودن بازار طلا مستقل ادامه دارد؛ برای دیدن وضعیت آن /paper را بفرست.";
+      const explanation = inSession ? "" : "\n\nیادآوری: محدودیت سشن فقط برای تحلیل AI است. Paper Trading در ساعات باز بودن بازار طلا مستقل ادامه دارد؛ برای دیدن وضعیت آن /paper را بفرست.";
       await sendTelegram(env, formatAnalysis(result) + explanation);
     } catch (error) {
       await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`);
