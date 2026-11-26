@@ -43,7 +43,7 @@ test("SiftingIO parser rejects wrong symbol, stale response, stale bars and bad 
     /response timestamp is missing or stale/,
   );
   assert.throws(
-    () => parseSiftingBars(base, Date.parse("2026-11-25T12:12:00.000Z")),
+    () => parseSiftingBars({ ...base, meta: { ...base.meta, as_of: "2026-11-25T12:11:50.000Z" } }, Date.parse("2026-11-25T12:12:00.000Z")),
     /Latest SiftingIO XAUUSD one-minute candle is stale/,
   );
   assert.throws(
