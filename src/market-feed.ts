@@ -1,9 +1,9 @@
 import { loadCandles, storeCandles } from "./storage.ts";
 import type { Candle, Timeframe } from "./types.ts";
+import { getFeedPollIntervalMs } from "./trading-sessions.ts";
 
 const API_BASE = "https://api.sifting.io/v1/hist/commodities/XAUUSD/bars";
 const PROVIDER = "siftingio";
-const FETCH_INTERVAL_MS = 90_000;
 const MAX_AS_OF_AGE_MS = 5 * 60_000;
 const MAX_BAR_AGE_MS = 7 * 60_000;
 const M1_MS = 60_000;
@@ -144,14 +144,14 @@ async function latestCandleTime(
   return candles.at(-1)?.time ?? null;
 }
 
-async function reservePoll(db: D1Database, now: number): Promise<boolean> {
+async function reservePoll(db: D1Database, now: number, intervalMs: number): Promise<boolean> {
   await db.prepare(
     "INSERT OR IGNORE INTO market_feed_state (provider, last_attempt_at, last_success_at, last_bar_at, last_error) VALUES (?, 0, NULL, NULL, NULL)",
   ).bind(PROVIDER).run();
 
   const result = await db.prepare(
     "UPDATE market_feed_state SET last_attempt_at = ? WHERE provider = ? AND last_attempt_at <= ?",
-  ).bind(now, PROVIDER, now - FETCH_INTERVAL_MS).run();
+  ).bind(now, PROVIDER, now - intervalMs).run();
 
   return (result.meta?.changes ?? 0) > 0;
 }
@@ -172,7 +172,13 @@ export async function refreshSiftingMarketData(
     return { configured: false, skipped: true, received: 0, stored: 0, reason: "SIFTING_API_KEY is not configured" };
   }
 
-  const reserved = await reservePoll(db, now);
+  const openPosition = await db.prepare("SELECT id FROM paper_positions WHERE status = 'OPEN' LIMIT 1").first();
+  const intervalMs = getFeedPollIntervalMs(now, Boolean(openPosition));
+  if (intervalMs === null) {
+    return { configured: true, skipped: true, received: 0, stored: 0, reason: "Outside London/New York sessions with no open paper position" };
+  }
+
+  const reserved = await reservePoll(db, now, intervalMs);
   if (!reserved) {
     return { configured: true, skipped: true, received: 0, stored: 0, reason: "Polling interval has not elapsed" };
   }
