@@ -168,6 +168,15 @@ export function assessResearchBundle(input: {
     }
   }
 
+  // A directional disagreement between independent Macro and Quant specialists is a hard
+  // pre-coordinator blocker. Do not leave this safety decision to the LLM coordinator.
+  if (macro && quant &&
+      macro.direction !== "NEUTRAL" &&
+      quant.direction !== "NEUTRAL" &&
+      macro.direction !== quant.direction) {
+    blockers.push("Macro and Quant specialists have opposing directional conclusions");
+  }
+
   const risk = reportsByAgent.get("risk");
   if (risk) {
     const checks = risk.riskChecks;
