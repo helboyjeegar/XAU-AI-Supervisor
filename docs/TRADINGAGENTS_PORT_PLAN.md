@@ -69,7 +69,7 @@ The upstream engine expects a model client. No paid provider may be enabled sile
 ## Runtime status and remaining differences
 
 - Production uses a fixed Worker-safe pipeline: closed-candle preflight and evidence generation; isolated Macro and Quant inferences; deterministic ATR reference-price/stop/target geometry; independent Risk challenge; contract validation; coordinator synthesis; D1 audit persistence; Telegram alert.
-- A deterministic gate now rejects opposite non-neutral Macro and Quant conclusions before the coordinator runs. A neutral Macro report can coexist with a directional Quant candidate, but calendar-only evidence must not be misrepresented as a macro price forecast.
+- A deterministic gate now rejects opposite non-neutral Macro and Quant conclusions before the coordinator runs. While the connected Macro source is calendar-only (no DXY/US10Y series), any directional model output is normalized to NEUTRAL; a calendar event alone is not directional gold evidence. A neutral Macro report can coexist with a directional Quant candidate.
 - The embedded prompts carry the core instructions from the XAU macro, technical-analysis and risk-assessment skills. The Markdown `SKILL.md` files remain the human-readable specifications and must be kept in sync.
 - This remains a bounded adapter, not a full port of upstream's step-by-step tool-calling loops, main-agent planning, dynamic specialist delegation, filesystem sessions, or general-purpose tool registry. Those capabilities are intentionally not transplanted into the Worker runtime.
 - Model calls remain subject to Cloudflare Workers AI quota/limits and an 8-run daily budget. One run reserves budget once and invokes four model inferences. No guarantee of unlimited free inference is made.
