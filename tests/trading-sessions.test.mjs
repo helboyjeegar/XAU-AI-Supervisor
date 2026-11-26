@@ -65,3 +65,12 @@ test("reports both sessions during their overlap", () => {
 test("does not treat a non-finite timestamp as an open session", () => {
   assert.equal(getTradingSessionStatus(Number.POSITIVE_INFINITY).allowed, false);
 });
+
+
+test("uses one-minute feed polling only during the London/New York overlap", async () => {
+  const { getFeedPollIntervalMs } = await import("../src/trading-sessions.ts");
+  assert.equal(getFeedPollIntervalMs(Date.parse("2026-01-05T14:00:00Z"), false), 60_000);
+  assert.equal(getFeedPollIntervalMs(Date.parse("2026-01-05T09:00:00Z"), false), 4 * 60_000);
+  assert.equal(getFeedPollIntervalMs(Date.parse("2026-01-05T23:00:00Z"), false), null);
+  assert.equal(getFeedPollIntervalMs(Date.parse("2026-01-05T23:00:00Z"), true), 6 * 60_000);
+});
