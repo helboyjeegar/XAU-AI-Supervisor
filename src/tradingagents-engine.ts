@@ -295,6 +295,15 @@ export async function runTradingAgentsResearch(
     }};
     reports = [macroReport, quantReport];
 
+    // Stop immediately on opposing specialist views; do not spend the Risk inference
+    // or let a coordinator model arbitrate away a material cross-discipline conflict.
+    if (macroReport.direction !== "NEUTRAL" && quantReport.direction !== "NEUTRAL" &&
+        macroReport.direction !== quantReport.direction) {
+      return noTrade(runId, input.now,
+        ["متخصصان Macro و Quant جهت‌های متضاد ارائه کردند؛ پیش از داوری نهایی معامله مسدود شد."],
+        commonWarnings, evidence, reports, "BLOCKED", checks);
+    }
+
     const quantSide = quantReport.direction, one = checks.snapshots["1m"];
     if (!one || quantSide === "NEUTRAL") return noTrade(runId, input.now,
       ["متخصص Quant جهت قابل دفاعی ارائه نکرد."], commonWarnings, evidence, reports, "BLOCKED", checks);
@@ -315,7 +324,8 @@ export async function runTradingAgentsResearch(
       evidence: evidence.filter((e) => e.tool === "risk_snapshot" || e.tool === "risk_geometry"),
       note: "The stored snapshot timestamp is checked; this is not broker reconciliation." };
     const riskRaw = await invoke(ai, model, "risk", prompt("risk"), {
-      market: checks.snapshots, quantConclusion: quantReport, riskFacts,
+      market: checks.snapshots, macroConclusion: macroReport,
+      quantConclusion: quantReport, riskFacts,
     }, 400);
     const riskModel = specialist(riskRaw, "risk", ids, input.now);
     if (!riskModel) return noTrade(runId, input.now,
