@@ -479,9 +479,16 @@ export default {
           await deleteOldResearchRuns(env.DB!, Date.now() - 90 * 24 * 60 * 60 * 1000);
           await env.DB!.prepare("DELETE FROM ai_daily_budget WHERE day_key < date('now', '-30 days')").run();
         } else {
-          if (!getTradingSessionStatus(Date.now()).allowed) return;
+          // Paper Trading runs across the full XAUUSD market week, independent of London/New York sessions.
+          // Skip Saturday and Sunday before 20:00 UTC while the gold market is normally closed.
+          const now = new Date();
+          const utcDay = now.getUTCDay();
+          const utcHour = now.getUTCHours();
+          if (utcDay === 6 || (utcDay === 0 && utcHour < 20)) return;
           await refreshMarketData(env);
           await processPaperTrading(env);
+          // Keep the AI research/alert engine restricted to its configured London/New York sessions.
+          if (!getTradingSessionStatus(Date.now()).allowed) return;
           await refreshMacroCalendar(env);
           if (env.ENABLE_TRADINGAGENTS !== "true") return;
           const latest = await latestResearchRun(env.DB!);
