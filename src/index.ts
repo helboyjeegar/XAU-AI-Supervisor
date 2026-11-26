@@ -449,11 +449,11 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       if (!backfill || !backfill.complete) {
         const progress = backfill
           ? "وضعیت: دریافت تاریخچه در حال انجام است. صفحات دریافت‌شده: " + backfill.pages +
-            "\\nشروع تاریخچه: " + new Date(backfill.startAt).toISOString() +
-            "\\nآخرین خطا: " + (backfill.lastError ?? "ندارد")
+            "\nشروع تاریخچه: " + new Date(backfill.startAt).toISOString() +
+            "\nآخرین خطا: " + (backfill.lastError ?? "ندارد")
           : "آرشیو تاریخی هنوز آغاز نشده؛ Worker در خارج از سشن‌های لندن/نیویورک آن را شروع می‌کند.";
-        await sendTelegram(env, "بک‌تست ماهانه هنوز آماده نیست.\\n" + progress +
-          "\\n\\nبرای رعایت سهمیه رایگان SiftingIO، دریافت تاریخچه با فاصله حداقل ۱۰ دقیقه بین درخواست‌ها انجام می‌شود.");
+        await sendTelegram(env, "بک‌تست ماهانه هنوز آماده نیست.\n" + progress +
+          "\n\nبرای رعایت سهمیه رایگان SiftingIO، دریافت تاریخچه با فاصله حداقل ۱۰ دقیقه بین درخواست‌ها انجام می‌شود.");
       } else {
         const months = await env.DB.prepare(`SELECT DISTINCT strftime('%Y-%m',ts/1000,'unixepoch') AS month
           FROM market_candles WHERE symbol='XAUUSD' AND timeframe='1m' ORDER BY month DESC LIMIT 7`)
@@ -473,11 +473,11 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
               (r.profitFactor === null ? "بدون زیان" : r.profitFactor.toFixed(2)),
             "افت سرمایه: " + r.maxDrawdownPercent.toFixed(2) + "% | کندل: " + r.candles +
               " | گپ بیش از ۱ دقیقه: " + r.gapsOverOneMinute,
-          ].join("\\n")).join("\\n\\n"),
+          ].join("\n")).join("\n\n"),
           "سرمایه شروع هر ماه: $10,000؛ حجم 0.01 لات؛ اسپرد فرضی 0.30 دلار/اونس؛ بدون کمیسیون و اسلیپیج.",
           "قیمت مرجع SiftingIO است. نتایج بک‌تست تضمین عملکرد آینده نیستند.",
         ];
-        await sendTelegram(env, lines.join("\\n\\n"));
+        await sendTelegram(env, lines.join("\n\n"));
       }
     }
   } else if (command === "/analyze") {
