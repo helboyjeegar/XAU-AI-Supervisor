@@ -196,7 +196,10 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   const db = env.DB;
   await ensureState(db,now);
   const last=(await loadCandles(db,"XAUUSD","1m",1))[0];
-  if (!last || now-(last.time+MS["1m"])>MAX_M1_AGE_MS) return;
+  if (!last || now-(last.time+MS["1m"])>MAX_M1_AGE_MS) {
+    await flushClosedTradeReports(env);
+    return;
+  }
 
   const state = await db.prepare(
     "SELECT last_processed_bar FROM paper_state WHERE id=1",
