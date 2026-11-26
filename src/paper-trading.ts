@@ -73,7 +73,7 @@ async function updateEquity(db: D1Database, now: number): Promise<void> {
 }
 async function closeOpen(db: D1Database, candle: Candle): Promise<void> {
   const open = await db.prepare("SELECT * FROM paper_positions WHERE status='OPEN' ORDER BY opened_at").all<{
-    id:string;side:string;units:number;entry_price:number;stop_loss:number;take_profit:number;
+    id:string;side:string;lots:number;units:number;entry_price:number;stop_loss:number;take_profit:number;opened_at:number;balance_at_entry:number;
   }>();
   for (const p of open.results ?? []) {
     let raw: number | null = null, reason = "";
@@ -128,15 +128,95 @@ async function maybeOpen(db: D1Database, now: number, allowEntry: boolean): Prom
   const target=side==="BUY"?entry+distance*TARGET_R:entry-distance*TARGET_R;
   const id=crypto.randomUUID(), units=LOTS*CONTRACT_OZ_PER_LOT;
   await db.batch([
-    db.prepare(`INSERT INTO paper_positions(id,side,lots,units,entry_price,stop_loss,take_profit,opened_at,status)
-      VALUES(?,?,?,?,?,?,?,?,'OPEN')`).bind(id,side,LOTS,units,entry,stop,target,last.time+MS["1m"]),
+    db.prepare(`INSERT INTO paper_positions(id,side,lots,units,entry_price,stop_loss,take_profit,opened_at,status,balance_at_entry)
+      VALUES(?,?,?,?,?,?,?,?,'OPEN',?)`).bind(id,side,LOTS,units,entry,stop,target,last.time+MS["1m"],state.balance),
     db.prepare("UPDATE paper_state SET last_processed_bar=?,updated_at=? WHERE id=1").bind(last.time,now)
   ]);
   return `معامله شبیه‌سازی‌شده جدید: ${side}\nورود: ${entry.toFixed(2)}\nحد ضرر: ${stop.toFixed(2)}\nحد سود: ${target.toFixed(2)}\nحجم: ${LOTS.toFixed(2)} لات\nمبنای قیمت: SiftingIO؛ نه قیمت اجرای بروکر.`;
 }
+async function sendPendingClosedTradeReports(env: Env): Promise<void> {
+  if (!env.DB) return;
+  const pending = await env.DB.prepare(`SELECT id,side,lots,units,entry_price,exit_price,stop_loss,opened_at,closed_at,
+    gross_pnl,costs,net_pnl,close_reason,balance_at_entry
+    FROM paper_positions WHERE status='CLOSED' AND close_notified_at IS NULL
+    ORDER BY closed_at ASC LIMIT 20`).all<{
+      id:string;side:string;lots:number;units:number;entry_price:number;exit_price:number;stop_loss:number;
+      opened_at:number;closed_at:number;gross_pnl:number;costs:number;net_pnl:number;close_reason:string;balance_at_entry:number;
+    }>();
+  for (const trade of pending.results ?? []) {
+    const balanceAfter = await env.DB.prepare("SELECT balance FROM paper_state WHERE id=1").first<{balance:number}>();
+    const pct = trade.balance_at_entry > 0 ? trade.net_pnl / trade.balance_at_entry * 100 : 0;
+    const riskUsd = Math.abs(trade.entry_price - trade.stop_loss) * trade.units;
+    const rMultiple = riskUsd > 0 ? trade.net_pnl / riskUsd : 0;
+    const duration = Math.max(0, Math.round((trade.closed_at - trade.opened_at) / 60_000));
+    const reason = trade.close_reason === "TAKE_PROFIT" ? "حد سود" : trade.close_reason === "STOP_LOSS" ? "حد ضرر" : trade.close_reason;
+    const message = [
+      "گزارش بسته‌شدن معامله — XAU/USD",
+      "سمت: " + trade.side,
+      "نتیجه: " + (trade.net_pnl > 0 ? "سود" : trade.net_pnl < 0 ? "ضرر" : "سر‌به‌سر"),
+      "سود/زیان خالص: " + (trade.net_pnl >= 0 ? "+" : "") + "$" + trade.net_pnl.toFixed(2),
+      "بازده نسبت به Balance زمان ورود: " + (pct >= 0 ? "+" : "") + pct.toFixed(3) + "%",
+      "بازده بر مبنای ریسک اولیه: " + (rMultiple >= 0 ? "+" : "") + rMultiple.toFixed(2) + "R",
+      "قیمت ورود: " + trade.entry_price.toFixed(2),
+      "قیمت خروج: " + trade.exit_price.toFixed(2),
+      "حد ضرر اولیه: " + trade.stop_loss.toFixed(2),
+      "حجم: " + trade.lots.toFixed(2) + " لات",
+      "مدت معامله: " + duration + " دقیقه",
+      "علت خروج: " + reason,
+      "Balance مجازی پس از معامله: $" + (balanceAfter?.balance ?? START_BALANCE).toFixed(2),
+      "شناسه: " + trade.id,
+      "حساب شبیه‌سازی است؛ قیمت مرجع SiftingIO و نه قیمت اجرای بروکر.",
+    ].join("\n");
+    if (await sendTelegram(env, message)) {
+      await env.DB.prepare("UPDATE paper_positions SET close_notified_at=? WHERE id=? AND close_notified_at IS NULL")
+        .bind(Date.now(), trade.id).run();
+    } else {
+      console.error("Paper trade close notification was not confirmed; it will be retried", trade.id);
+    }
+  }
+}
+
+export async function formatPaperStatus(env: Env): Promise<string> {
+  if (!env.DB) return "Paper Trading: پایگاه داده در دسترس نیست.";
+  await ensureState(env.DB, Date.now());
+  const [state, open, stats, recent] = await Promise.all([
+    env.DB.prepare("SELECT balance,equity,peak_equity,daily_locked,day_key FROM paper_state WHERE id=1")
+      .first<{balance:number;equity:number;peak_equity:number;daily_locked:number;day_key:string}>(),
+    env.DB.prepare("SELECT side,lots,entry_price,stop_loss,take_profit,opened_at FROM paper_positions WHERE status='OPEN' ORDER BY opened_at DESC LIMIT 1")
+      .first<{side:string;lots:number;entry_price:number;stop_loss:number;take_profit:number;opened_at:number}>(),
+    env.DB.prepare(`SELECT COUNT(*) AS trades,
+      SUM(CASE WHEN net_pnl>0 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN net_pnl<0 THEN 1 ELSE 0 END) AS losses,
+      COALESCE(SUM(net_pnl),0) AS net FROM paper_positions WHERE status='CLOSED'`)
+      .first<{trades:number;wins:number;losses:number;net:number}>(),
+    env.DB.prepare("SELECT side,net_pnl,closed_at FROM paper_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT 5")
+      .all<{side:string;net_pnl:number;closed_at:number}>(),
+  ]);
+  const lines = [
+    "وضعیت Paper Trading — XAU/USD",
+    "Balance مجازی: $" + (state?.balance ?? START_BALANCE).toFixed(2),
+    "Equity مجازی: $" + (state?.equity ?? START_BALANCE).toFixed(2),
+    "سود/زیان خالص تجمعی: $" + (stats?.net ?? 0).toFixed(2),
+    "معاملات بسته‌شده: " + (stats?.trades ?? 0) + " | سودده: " + (stats?.wins ?? 0) + " | زیان‌ده: " + (stats?.losses ?? 0),
+    "قفل افت روزانه ۵٪: " + (state?.daily_locked ? "فعال" : "غیرفعال"),
+    open ? "معامله باز: " + open.side + "، ورود " + open.entry_price.toFixed(2) + "، SL " + open.stop_loss.toFixed(2) + "، TP " + open.take_profit.toFixed(2) : "معامله باز: ندارد",
+    "برنامه: تمام ساعات بازبودن بازار طلا؛ مستقل از سشن لندن/نیویورک.",
+    "حساب مجازی؛ بدون سفارش بروکر.",
+  ];
+  if ((recent.results ?? []).length) {
+    lines.push("۵ معامله بسته‌شده اخیر:");
+    for (const t of recent.results ?? []) lines.push(
+      new Date(t.closed_at).toISOString().replace("T"," ").slice(0,16) + " UTC | " + t.side + " | " +
+      (t.net_pnl >= 0 ? "+" : "") + "$" + t.net_pnl.toFixed(2)
+    );
+  }
+  return lines.join("\n");
+}
+
 export async function processPaperTrading(env: Env, now=Date.now()): Promise<void> {
   if (!env.DB || !env.SIFTING_API_KEY) return;
   const db = env.DB;
+  await sendPendingClosedTradeReports(env);
   await ensureState(db,now);
   const last=(await loadCandles(db,"XAUUSD","1m",1))[0];
   if (!last || now-(last.time+MS["1m"])>MAX_M1_AGE_MS) return;
@@ -188,7 +268,11 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   const alert = await maybeOpen(db,now,caughtUp);
   await db.prepare("UPDATE paper_state SET last_processed_bar=MAX(last_processed_bar,?),updated_at=? WHERE id=1")
     .bind(last.time,now).run();
-  if (alert) await sendTelegram(env,alert);
+  if (alert) {
+    const sent = await sendTelegram(env,alert);
+    if (!sent) console.error("Paper trade entry notification was not confirmed", alert);
+  }
+  await sendPendingClosedTradeReports(env);
 }
 export async function sendPaperDailyReport(env: Env, now=Date.now()): Promise<void> {
   if (!env.DB) return;
