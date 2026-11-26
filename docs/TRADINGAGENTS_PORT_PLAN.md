@@ -1,6 +1,6 @@
 # TradingAgents v1.0.1 XAUUSD Port Plan
 
-Status: architecture and compatibility plan; no live decision path changed yet.
+Status: implemented as a Worker-safe research adapter in the active production decision path; this is a bounded adaptation of TradingAgents v1.0.1, not the upstream CLI runtime.
 
 ## Source of truth
 
@@ -42,7 +42,7 @@ The Equity Research role is not applicable to spot gold and must not be fabricat
 - `xau-risk-assessment`: challenge the thesis, define invalidation, verify stop/target geometry and enforce daily risk.
 - `xau-decision-review`: require the coordinator to reconcile specialist disagreement and cite the evidence supporting each material claim.
 
-Skills must follow the upstream `SKILL.md` frontmatter/body convention. Agent files must follow the upstream strict agent-file format. Their implementation must be tested against the pinned upstream parser contracts before they are used.
+Skills follow the upstream `SKILL.md` frontmatter/body convention. The active Worker cannot read project files at runtime, so the core XAU skill instructions are embedded in `src/tradingagents-engine.ts` and must be kept synchronized with the Markdown skill files. The Worker does not yet run the upstream free-form agent tool loop, dynamic delegation planner, or filesystem-backed skill loader; it uses a fixed, bounded four-inference workflow (Macro and Quant in parallel, Risk challenge, then main coordinator) with a prebuilt evidence bundle.
 
 ## Existing user constraints that remain hard gates
 
@@ -66,15 +66,17 @@ Do not import the full upstream CLI into Cloudflare Workers. Build a Worker-comp
 
 The upstream engine expects a model client. No paid provider may be enabled silently. Before enabling an LLM route, prove its authentication, cost/quota, latency, output validation and failure behavior. If no acceptable no-cost model route is available, keep the decision path in `NO_TRADE` and report the limitation. A deterministic calculation is a tool result, not a substitute for claiming that an LLM agent ran.
 
-## Migration sequence
+## Runtime status and remaining differences
 
-1. Keep current `develop` and deployed Worker unchanged as the rollback baseline.
-2. Add upstream-pinned architecture and skill specifications on this feature branch.
-3. Implement and test the Worker-compatible evidence/tool contracts.
-4. Implement independent Macro, Quant and Risk specialist runs plus coordinator synthesis.
-5. Add tests for specialist disagreement, missing evidence, stale candles, point-in-time macro handling, risk expiry, daily-loss lock, and invalid model output.
-6. Run CI and review diffs; only then consider deployment to a staging Worker.
-7. Promote only after explicit smoke tests. Never enable broker execution.
+- Production uses a fixed Worker-safe pipeline: closed-candle preflight and evidence generation; isolated Macro and Quant inferences; deterministic ATR reference-price/stop/target geometry; independent Risk challenge; contract validation; coordinator synthesis; D1 audit persistence; Telegram alert.
+- A deterministic gate now rejects opposite non-neutral Macro and Quant conclusions before the coordinator runs. A neutral Macro report can coexist with a directional Quant candidate, but calendar-only evidence must not be misrepresented as a macro price forecast.
+- The embedded prompts carry the core instructions from the XAU macro, technical-analysis and risk-assessment skills. The Markdown `SKILL.md` files remain the human-readable specifications and must be kept in sync.
+- This remains a bounded adapter, not a full port of upstream's step-by-step tool-calling loops, main-agent planning, dynamic specialist delegation, filesystem sessions, or general-purpose tool registry. Those capabilities are intentionally not transplanted into the Worker runtime.
+- Model calls remain subject to Cloudflare Workers AI quota/limits and an 8-run daily budget. One run reserves budget once and invokes four model inferences. No guarantee of unlimited free inference is made.
+- The model's BUY/SELL is a research direction; entry is the last completed 1m close, and stop/target are deterministic ATR levels. The Telegram message now labels this as a reference price, not a broker fill or executable quote.
+- No broker API is connected. The user-entered risk snapshot is not independently verified by a broker and expires after two minutes. DXY and US10Y remain unavailable unless connected.
+- Paper Trading remains a separate deterministic simulation strategy, not the TradingAgents alert path; its assumptions are documented independently.
+- CI and deployment status are tracked by the corresponding GitHub PR and Cloudflare deployment records. Never enable broker execution.
 
 ## Attribution
 
