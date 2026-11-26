@@ -101,6 +101,9 @@ function fresh(c: Candle[], tf: "1m" | "5m" | "30m", now: number): boolean {
 function inspect(input: TradingAgentsInput): Checks {
   const blockers: string[] = [], warnings: string[] = [];
   const lists = { "1m": input.oneMinute, "5m": input.fiveMinute, "30m": input.thirtyMinute };
+  if (!input.marketDataSource.trim() || /unverified|unknown|not recorded/i.test(input.marketDataSource)) {
+    blockers.push("منبع داده کندل‌ها قابل انتساب و راستی‌آزمایی نیست");
+  }
   const candlesComplete = Object.values(lists).every(seriesValid);
   if (!candlesComplete) blockers.push("هر سه تایم‌فریم باید حداقل ۵۵ کندل معتبر و مرتب داشته باشند");
   const candlesFresh = (Object.keys(lists) as Array<keyof typeof lists>).every((tf) => fresh(lists[tf], tf, input.now));
