@@ -80,11 +80,12 @@ function parseDecision(v: unknown, ids: Set<string>): Decision | null {
   if (!summary || !reasons) return null;
   return { side: p.side as Decision["side"], summary, reasons };
 }
-function seriesValid(c: Candle[]): boolean {
+function seriesValid(c: Candle[], tf: "1m" | "5m" | "30m"): boolean {
   if (!Array.isArray(c) || c.length < 55) return false;
   let previous = 0;
   for (const x of c) {
     if ([x.time, x.open, x.high, x.low, x.close, x.volume].some((n) => !Number.isFinite(n)) ||
+      !Number.isSafeInteger(x.time) || x.time % DURATIONS[tf] !== 0 ||
       x.time <= previous || x.open <= 0 || x.high <= 0 || x.low <= 0 || x.close <= 0 || x.volume < 0 ||
       x.high < Math.max(x.open, x.close, x.low) || x.low > Math.min(x.open, x.close, x.high)) return false;
     previous = x.time;
@@ -104,7 +105,7 @@ function inspect(input: TradingAgentsInput): Checks {
   if (!input.marketDataSource.trim() || /unverified|unknown|not recorded/i.test(input.marketDataSource)) {
     blockers.push("منبع داده کندل‌ها قابل انتساب و راستی‌آزمایی نیست");
   }
-  const candlesComplete = Object.values(lists).every(seriesValid);
+  const candlesComplete = (Object.keys(lists) as Array<keyof typeof lists>).every((tf) => seriesValid(lists[tf], tf));
   if (!candlesComplete) blockers.push("هر سه تایم‌فریم باید حداقل ۵۵ کندل معتبر و مرتب داشته باشند");
   const candlesFresh = (Object.keys(lists) as Array<keyof typeof lists>).every((tf) => fresh(lists[tf], tf, input.now));
   if (!candlesFresh) blockers.push("حداقل یکی از تایم‌فریم‌ها قدیمی است یا آخرین کندل آن هنوز بسته نشده است");
