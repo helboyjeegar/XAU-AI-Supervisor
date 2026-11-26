@@ -73,7 +73,7 @@ async function updateEquity(db: D1Database, now: number): Promise<void> {
 }
 async function closeOpen(db: D1Database, candle: Candle): Promise<void> {
   const open = await db.prepare("SELECT * FROM paper_positions WHERE status='OPEN' ORDER BY opened_at").all<{
-    id:string;side:string;units:number;entry_price:number;stop_loss:number;take_profit:number;
+    id:string;side:string;lots:number;units:number;entry_price:number;stop_loss:number;take_profit:number;opened_at:number;
   }>();
   for (const p of open.results ?? []) {
     let raw: number | null = null, reason = "";
@@ -86,13 +86,70 @@ async function closeOpen(db: D1Database, candle: Candle): Promise<void> {
     }
     if (raw === null) continue;
     const exit = priceExit(p.side,raw);
+    // Entry and exit prices both include the assumed half-spread. This is the
+    // realized simulated P/L after the assumed spread, before any other fees.
     const gross = (p.side === "BUY" ? exit-p.entry_price : p.entry_price-exit)*p.units;
     const costs = 0;
     const net = gross-costs;
+    const before = await db.prepare("SELECT balance FROM paper_state WHERE id=1").first<{balance:number}>();
+    const balanceBefore = before?.balance ?? START_BALANCE;
+    const balanceAfter = balanceBefore + net;
+    const returnPercent = balanceBefore > 0 ? net / balanceBefore * 100 : 0;
+    const report = JSON.stringify({
+      side:p.side, lots:p.lots, entry:p.entry_price, exit, net, returnPercent,
+      reason, openedAt:p.opened_at, closedAt:candle.time+MS["1m"], balanceAfter,
+    });
     await db.batch([
       db.prepare(`UPDATE paper_positions SET status='CLOSED',closed_at=?,exit_price=?,gross_pnl=?,costs=?,net_pnl=?,close_reason=? WHERE id=? AND status='OPEN'`).bind(candle.time+MS["1m"],exit,gross,costs,net,reason,p.id),
-      db.prepare("UPDATE paper_state SET balance=balance+? WHERE id=1").bind(net)
+      db.prepare("UPDATE paper_state SET balance=balance+? WHERE id=1").bind(net),
+      db.prepare("INSERT OR IGNORE INTO paper_trade_notifications(position_id,payload,created_at) VALUES(?,?,?)").bind(p.id,report,candle.time+MS["1m"]),
     ]);
+  }
+}
+async function flushClosedTradeReports(env: Env): Promise<void> {
+  if (!env.DB) return;
+  const pending = await env.DB.prepare(
+    "SELECT position_id,payload,attempts FROM paper_trade_notifications WHERE sent_at IS NULL ORDER BY created_at ASC LIMIT 20",
+  ).all<{position_id:string;payload:string;attempts:number}>();
+  if (!pending.results?.length) return;
+  const state = await env.DB.prepare("SELECT balance,equity FROM paper_state WHERE id=1")
+    .first<{balance:number;equity:number}>();
+  for (const row of pending.results) {
+    try {
+      const trade = JSON.parse(row.payload) as {
+        side:string;lots:number;entry:number;exit:number;net:number;returnPercent:number;
+        reason:string;openedAt:number;closedAt:number;balanceAfter:number;
+      };
+      const pnl = (trade.net >= 0 ? "+" : "-") + "$" + Math.abs(trade.net).toFixed(2);
+      const pct = (trade.returnPercent >= 0 ? "+" : "") + trade.returnPercent.toFixed(3) + "%";
+      const duration = Math.max(0, Math.round((trade.closedAt-trade.openedAt)/60_000));
+      const reason = trade.reason === "TAKE_PROFIT" ? "حد سود" : "حد ضرر";
+      const message = [
+        "گزارش معامله بسته‌شده — Paper Trading / XAUUSD",
+        "نتیجه: " + (trade.net >= 0 ? "سود" : "ضرر"),
+        "جهت: " + trade.side + " | حجم: " + trade.lots.toFixed(2) + " لات",
+        "قیمت ورود: " + trade.entry.toFixed(2),
+        "قیمت خروج: " + trade.exit.toFixed(2),
+        "سود/زیان خالص پس از اسپرد فرضی: " + pnl + " (" + pct + ")",
+        "علت خروج: " + reason,
+        "مدت معامله: " + duration + " دقیقه",
+        "Balance مجازی: $" + (state?.balance ?? trade.balanceAfter).toFixed(2),
+        "Equity مجازی: $" + (state?.equity ?? trade.balanceAfter).toFixed(2),
+        "شناسه: " + row.position_id.slice(0,8),
+        "قیمت مرجع SiftingIO است؛ این گزارش اجرای بروکر واقعی نیست.",
+      ].join("\n");
+      const sent = await sendTelegram(env,message);
+      if (sent) {
+        await env.DB.prepare("UPDATE paper_trade_notifications SET sent_at=?,attempts=attempts+1,last_error=NULL WHERE position_id=? AND sent_at IS NULL")
+          .bind(Date.now(),row.position_id).run();
+      } else {
+        await env.DB.prepare("UPDATE paper_trade_notifications SET attempts=attempts+1,last_error=? WHERE position_id=? AND sent_at IS NULL")
+          .bind("Telegram did not confirm message delivery",row.position_id).run();
+      }
+    } catch (error) {
+      await env.DB.prepare("UPDATE paper_trade_notifications SET attempts=attempts+1,last_error=? WHERE position_id=? AND sent_at IS NULL")
+        .bind((error instanceof Error ? error.message : "Unknown notification error").slice(0,300),row.position_id).run();
+    }
   }
 }
 async function maybeOpen(db: D1Database, now: number, allowEntry: boolean): Promise<string | null> {
@@ -151,6 +208,7 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
     await db.prepare("UPDATE paper_state SET last_processed_bar=?,updated_at=? WHERE id=1")
       .bind(last.time,now).run();
     await updateEquity(db,now);
+    await flushClosedTradeReports(env);
     return;
   }
 
@@ -162,6 +220,7 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   const candles = pending.results ?? [];
   if (candles.length === 0) {
     await updateEquity(db,now);
+    await flushClosedTradeReports(env);
     return;
   }
 
@@ -174,6 +233,7 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   }
 
   await updateEquity(db,now);
+  await flushClosedTradeReports(env);
   const day = utcDay(now);
   const dayState = await db.prepare("SELECT day_key,equity FROM paper_state WHERE id=1")
     .first<{day_key:string;equity:number}>();
