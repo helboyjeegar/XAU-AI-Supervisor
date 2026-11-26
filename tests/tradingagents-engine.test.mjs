@@ -220,3 +220,14 @@ test("calendar-only Macro output cannot create a directional gold thesis", async
   assert.ok(run.reports[0].warnings.some((item) => item.includes("فقط تقویم رویدادها")));
   assert.ok(calls.some((item) => item.role === "main_coordinator"));
 });
+
+test("candle timestamps must be integer UTC bucket opens aligned to each timeframe", async () => {
+  const { ai, calls } = mockAi();
+  const oneMinute = makeCandles(60_000);
+  oneMinute[40].time += 1;
+  const run = await runTradingAgentsResearch(input({ oneMinute }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("حداقل ۵۵ کندل معتبر")));
+  assert.equal(calls.length, 0);
+});
