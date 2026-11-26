@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatStatus, parseRiskCommand } from "../src/telegram.ts";
+import { formatAnalysis, formatStatus, parseRiskCommand } from "../src/telegram.ts";
 
 test("parses a manual risk snapshot", () => {
   assert.deepEqual(parseRiskCommand("/risk 10000 9950"), {
@@ -51,4 +51,22 @@ test("unknown prop reset timezone is visibly fail-closed", () => {
   });
   assert.match(status, /منطقه زمانی ریست روزانه مشخص نشده/);
   assert.match(status, /قفل روزانه: فعال/);
+});
+
+test("signal messages identify the reference candle, source and non-executable price", () => {
+  const at = Date.UTC(2026, 10, 26, 16, 19, 0);
+  const message = formatAnalysis({
+    id: "test-run", researchRunId: "test-run", researchStatus: "COMPLETED",
+    evidenceIds: ["e1"], symbol: "XAUUSD", generatedAt: at,
+    marketDataSource: "SiftingIO XAUUSD reference feed", entryReferenceAt: at,
+    verdict: "BUY", side: "BUY", score: 100, scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY",
+    entry: 3576.95, stopLoss: 3575.31, takeProfit: 3579.41, riskReward: 1.5,
+    reasons: ["Evidence supports an upward candidate"], blockers: [], warnings: [],
+    agents: [], timeframes: {},
+  });
+  assert.match(message, /قیمت مرجع ورود \(بسته‌شدن آخرین کندل 1m\)/);
+  assert.match(message, /SiftingIO XAUUSD reference feed/);
+  assert.match(message, /2026-11-26T16:19:00.000Z/);
+  assert.match(message, /قیمت قابل تضمین اجرای بروکر نیست/);
+  assert.match(message, /سفارش معاملاتی اجرا نشده است/);
 });
