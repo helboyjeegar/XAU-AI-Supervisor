@@ -356,7 +356,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   // Ignore ordinary text and media captions instead of replying "unknown command".
   if (!messageText.startsWith("/")) return json({ ok: true, ignored: true });
   if (command === "/help" || command === "/start") {
-    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل AI (فقط سشن لندن/نیویورک)\n/paper — گزارش موجودی، معامله باز و نتایج اخیر شبیه‌سازی\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل AI (فقط سشن لندن/نیویورک)\n/paper — گزارش موجودی، معامله باز و نتایج اخیر شبیه‌سازی\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/backtest — گزارش بک‌تست ماهانه Paper\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
   } else if (command === "/test") {
     const sent = await sendTelegram(env, "آزمایش تلگرام: پیام فرمان دریافت شد و ارسال پاسخ از Worker انجام شد. هیچ تحلیلی یا سفارشی اجرا نشده است.");
     if (!sent) console.error("Telegram test reply could not be sent");
