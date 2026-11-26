@@ -170,7 +170,7 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
       verdict: "NO_TRADE", side: "NEUTRAL", score: 0,
       scoreMeaning: "EVIDENCE_SCORE_NOT_PROBABILITY", entry: null, stopLoss: null,
       takeProfit: null, riskReward: null, reasons: [],
-      blockers: ["خارج از ساعات مجاز؛ تحلیل ورود فقط در سشن لندن یا نیویورک و در روزهای کاری فعال است."],
+      blockers: ["خارج از سشن لندن/نیویورک؛ فقط پژوهش و هشدار AI متوقف است. Paper Trading مستقل، در ساعات باز بودن بازار طلا ادامه دارد."],
       warnings: ["ساعت سشن‌ها بر اساس منطقه زمانی IANA و تغییر ساعت تابستانی محاسبه می‌شود."],
       agents: [], timeframes: {},
       researchStatus: env.ENABLE_TRADINGAGENTS === "true" ? "BLOCKED" : "DISABLED",
@@ -329,7 +329,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
   const command = messageText.split(/\s+/, 1)[0].split("@", 1)[0];
   if (!env.TELEGRAM_CHAT_ID || chatId !== env.TELEGRAM_CHAT_ID) return json({ ok: true, ignored: true });
   if (command === "/help" || command === "/start") {
-    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل جدید\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
+    await sendTelegram(env, "دستورات:\n/status — وضعیت ریسک و موتور پژوهش\n/risk — ثبت دستی ریسک حساب\n/analyze — اجرای تحلیل AI (فقط سشن لندن/نیویورک)\n/paper — گزارش موجودی، معامله باز و نتایج اخیر شبیه‌سازی\n/test — آزمایش پیام رفت‌وبرگشت تلگرام\n/help — راهنما\n\nبرای ثبت ریسک بنویس:\n/risk 10000 9950\nعدد اول: Balance ابتدای روز معاملاتی در ساعت ۰۰:۰۰ UTC؛ عدد دوم: Equity فعلی با احتساب سود/زیان شناور. هر دو باید به یک ارز و مربوط به یک حساب باشند. این اطلاعات دستی است و ربات به بروکر وصل نیست.");
   } else if (command === "/test") {
     const sent = await sendTelegram(env, "آزمایش تلگرام: پیام فرمان دریافت شد و ارسال پاسخ از Worker انجام شد. هیچ تحلیلی یا سفارشی اجرا نشده است.");
     if (!sent) console.error("Telegram test reply could not be sent");
@@ -388,9 +388,42 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       "\nمنطقه زمانی ریست روزانه: " + (configuredRiskTimezone(env) ?? "تعیین نشده؛ قفل ورود فعال است") +
       "\nسشن مجاز: " + (session.allowed ? session.sessions.join(" + ") : "خارج از سشن") +
       "\n\n" + feedStatus);
+  } else if (command === "/paper") {
+    if (!env.DB) {
+      await sendTelegram(env,"وضعیت Paper Trading: پایگاه داده در دسترس نیست.");
+    } else {
+      const [state,open,closed,feed] = await Promise.all([
+        env.DB.prepare("SELECT balance,equity,peak_equity,daily_start_equity,daily_locked,updated_at FROM paper_state WHERE id=1").first<{balance:number;equity:number;peak_equity:number;daily_start_equity:number;daily_locked:number;updated_at:number}>(),
+        env.DB.prepare("SELECT side,lots,entry_price,stop_loss,take_profit,opened_at FROM paper_positions WHERE status='OPEN' ORDER BY opened_at DESC LIMIT 1").first<{side:string;lots:number;entry_price:number;stop_loss:number;take_profit:number;opened_at:number}>(),
+        env.DB.prepare("SELECT side,net_pnl,entry_price,exit_price,closed_at,close_reason FROM paper_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT 5").all<{side:string;net_pnl:number;entry_price:number;exit_price:number;closed_at:number;close_reason:string}>(),
+        env.DB.prepare("SELECT last_success_at,last_bar_at,last_error FROM market_feed_state WHERE provider='siftingio'").first<{last_success_at:number|null;last_bar_at:number|null;last_error:string|null}>(),
+      ]);
+      const lines = [
+        "وضعیت Paper Trading — XAU/USD",
+        "حالت: شبیه‌سازی؛ بدون سفارش بروکر",
+        "Balance: $" + (state?.balance ?? 10000).toFixed(2),
+        "Equity: $" + (state?.equity ?? 10000).toFixed(2),
+        "Peak Equity: $" + (state?.peak_equity ?? 10000).toFixed(2),
+        "قفل افت روزانه ۵٪: " + (state?.daily_locked ? "فعال" : "غیرفعال"),
+        "ساعت فعالیت: تمام ساعات باز بودن بازار طلا؛ مستقل از سشن لندن/نیویورک",
+        open ? ["معامله باز: " + open.side + " | " + open.lots.toFixed(2) + " لات","ورود: " + open.entry_price.toFixed(2) + " | SL: " + open.stop_loss.toFixed(2) + " | TP: " + open.take_profit.toFixed(2),"زمان ورود: " + new Date(open.opened_at).toISOString()].join("\n") : "معامله باز: ندارد",
+        "۵ نتیجه بسته‌شده اخیر:",
+        ...(closed.results ?? []).map(t => (t.net_pnl >= 0 ? "+" : "-") + "$" + Math.abs(t.net_pnl).toFixed(2) + " | " + t.side + " | " + t.entry_price.toFixed(2) + " → " + t.exit_price.toFixed(2) + " | " + t.close_reason),
+        "آخرین دریافت بازار: " + (feed?.last_success_at ? new Date(feed.last_success_at).toISOString() : "ثبت نشده"),
+        feed?.last_error ? "خطای فید: " + feed.last_error : "",
+      ].filter(Boolean);
+      await sendTelegram(env,lines.join("\n"));
+    }
   } else if (command === "/analyze") {
-    try { if (getTradingSessionStatus(Date.now()).allowed) { await refreshMarketData(env); await refreshMacroCalendar(env); } const result = await runAnalysis(env, false); await sendTelegram(env, formatAnalysis(result)); }
-    catch (error) { await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`); }
+    try {
+      const inSession = getTradingSessionStatus(Date.now()).allowed;
+      if (inSession) { await refreshMarketData(env); await refreshMacroCalendar(env); }
+      const result = await runAnalysis(env, false);
+      const explanation = inSession ? "" : "\n\nیادآوری: محدودیت سشن فقط برای تحلیل AI است. Paper Trading در ساعات باز بودن بازار طلا مستقل ادامه دارد؛ برای دیدن وضعیت آن /paper را بفرست.";
+      await sendTelegram(env, formatAnalysis(result) + explanation);
+    } catch (error) {
+      await sendTelegram(env, `تحلیل انجام نشد: ${error instanceof Error ? error.message : "خطای نامشخص"}`);
+    }
   } else {
     await sendTelegram(env, "دستور شناخته نشد. /help را بفرست.");
   }
