@@ -1,6 +1,5 @@
 import type { Candle } from "./types.ts";
 import { resampleCandles } from "./market-feed.ts";
-import { getTradingSessionStatus } from "./trading-sessions.ts";
 
 const MINUTE = 60_000;
 const START_BALANCE = 10_000;
@@ -10,6 +9,12 @@ const HALF_SPREAD = 0.15;
 const STOP_ATR = 1.2;
 const TARGET_R = 1.8;
 const DAILY_DD = 5;
+
+function goldMarketOpen(timestampMs: number): boolean {
+  const date = new Date(timestampMs);
+  const day = date.getUTCDay();
+  return day !== 6 && !(day === 0 && date.getUTCHours() < 20);
+}
 
 export interface MonthlyBacktestResult {
   month: string;
@@ -107,7 +112,7 @@ export async function runPaperBacktestMonth(db: D1Database, month: string, now =
   const gapsOverOneMinute = inMonth.slice(1).filter((c, i) => c.time - inMonth[i]!.time > MINUTE).length;
   const assumptions = [
     "همان قواعد Paper فعلی: EMA20/50 در 5m و 30m، برگشت قیمت از EMA20 در 1m، RSI14 و ATR14.",
-    "ورود فقط در پنجره‌های زمانی لندن/نیویورک، مطابق کد فعلی Paper.",
+    "ورود در تمام ساعات معمول بازبودن بازار طلا؛ شنبه و یکشنبه پیش از ۲۰:۰۰ UTC بدون ورود، مطابق زمان‌بندی Worker.",
     "حجم ثابت 0.01 لات؛ قرارداد فرضی 100 اونس در هر لات (1 اونس برای این حجم).",
     "اسپرد فرضی 0.30 دلار به‌ازای هر اونس؛ کمیسیون و اسلیپیج جداگانه صفر فرض شده‌اند.",
     "اگر SL و TP در یک کندل لمس شوند، محافظه‌کارانه SL مقدم است.",
@@ -188,7 +193,7 @@ export async function runPaperBacktestMonth(db: D1Database, month: string, now =
     if (peak > 0) maxDrawdown = Math.max(maxDrawdown, (peak - equity) / peak * 100);
     if (equity <= dailyStart * (1 - DAILY_DD / 100)) dailyLocked = true;
 
-    if (position || dailyLocked || !getTradingSessionStatus(decisionAt).allowed) continue;
+    if (position || dailyLocked || !goldMarketOpen(decisionAt)) continue;
     const side5 = e20_5[p5] === null || e50_5[p5] === null ? null
       : e20_5[p5]! > e50_5[p5]! ? "BUY" : e20_5[p5]! < e50_5[p5]! ? "SELL" : null;
     const side30 = e20_30[p30] === null || e50_30[p30] === null ? null
