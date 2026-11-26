@@ -67,3 +67,22 @@ test("Telegram webhook ignores messages from chats other than the configured cha
     assert.equal(calls, 0);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test("Telegram webhook silently ignores plain-text status reports", async () => {
+  const secret = "unit-test-webhook-secret";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  const token = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response("{}", { status: 200 }); };
+  try {
+    const response = await worker.fetch(new Request("https://example.test/telegram/webhook", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": token },
+      body: JSON.stringify({ message: { chat: { id: 123 }, text: "گزارش فنی نسخه جدید منتشر شد" } }),
+    }), { TELEGRAM_WEBHOOK_SECRET: secret, TELEGRAM_CHAT_ID: "123", TELEGRAM_BOT_TOKEN: "test-bot-token" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, ignored: true });
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
