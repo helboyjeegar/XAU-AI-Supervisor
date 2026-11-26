@@ -456,7 +456,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
           "\\n\\nبرای رعایت سهمیه رایگان SiftingIO، دریافت تاریخچه با فاصله حداقل ۱۰ دقیقه بین درخواست‌ها انجام می‌شود.");
       } else {
         const months = await env.DB.prepare(`SELECT DISTINCT strftime('%Y-%m',ts/1000,'unixepoch') AS month
-          FROM market_candles WHERE symbol='XAUUSD' AND timeframe='1m' ORDER BY month DESC LIMIT 6`)
+          FROM market_candles WHERE symbol='XAUUSD' AND timeframe='1m' ORDER BY month DESC LIMIT 7`)
           .all<{month:string}>();
         const results = [];
         for (const row of (months.results ?? []).reverse()) {
