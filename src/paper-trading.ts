@@ -1,7 +1,6 @@
 import type { Candle } from "./types.ts";
 import { loadCandles } from "./storage.ts";
 import { sendTelegram } from "./telegram.ts";
-import { getTradingSessionStatus } from "./trading-sessions.ts";
 import type { Env } from "./types.ts";
 
 const START_BALANCE = 10_000;
@@ -249,8 +248,7 @@ export async function processPaperTrading(env: Env, now=Date.now()): Promise<voi
   // Only consider a new entry when the newest closed candle was processed in this run.
   // Older missed candles are used for exits, never for retrospective entries.
   const caughtUp = candles.at(-1)!.time === last.time;
-  const sessionAllowsEntry = getTradingSessionStatus(now).allowed;
-  const alert = await maybeOpen(db,now,caughtUp && sessionAllowsEntry);
+  const alert = await maybeOpen(db,now,caughtUp);
   await db.prepare("UPDATE paper_state SET last_processed_bar=MAX(last_processed_bar,?),updated_at=? WHERE id=1")
     .bind(last.time,now).run();
   if (alert) await sendTelegram(env,alert);
