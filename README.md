@@ -8,7 +8,7 @@ An XAU/USD research, risk-supervision and simulated paper-trading service. The a
 
 - Cloudflare Worker API with authenticated market-data and risk ingestion.
 - Default cloud-hosted XAUUSD data adapter via SiftingIO commodities REST API; no MT5 desktop or always-on user computer is required. The key is held only as a Cloudflare Worker secret.
-- 1m XAUUSD reference OHLCV uses adaptive polling: every minute during the London/New York overlap, every four minutes during the remainder of either session, and every six minutes outside sessions only while a paper position is open (for exit monitoring). Outside sessions with no open paper position, the feed is idle. Complete 5m and 30m candles are resampled from the 1m bars. Paper entries are restricted to London/New York weekdays; open-position exit monitoring continues outside sessions.
+- 1m XAUUSD reference OHLCV uses adaptive polling: every minute during the London/New York overlap, every four minutes during the remainder of either session, and every six minutes outside sessions only while a paper position is open (for exit monitoring). Outside sessions with no open paper position, the feed is idle. Complete 5m and 30m candles are resampled from the 1m bars. Paper entries run across all normal XAUUSD market hours; the AI research/alert engine remains restricted to London/New York sessions.
 - D1 persistence for OHLCV candles, analysis decisions, daily risk state and macro context.
 - Four specialist modules: Gold Technical Analyst, Quant Research, Macro Strategy and Risk Analysis; a deterministic supervisor combines their findings.
 - 1m entry analysis with 5m and 30m trend context.
