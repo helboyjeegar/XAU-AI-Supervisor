@@ -445,13 +445,19 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
     if (!env.DB) {
       await sendTelegram(env, "بک‌تست در دسترس نیست: پایگاه داده متصل نیست.");
     } else {
-      const backfill = await getBackfillStatus(env.DB);
+      let backfill = await getBackfillStatus(env.DB);
+      if (!backfill && env.SIFTING_API_KEY) {
+        try { backfill = await backfillPaperHistory(env.DB, env.SIFTING_API_KEY, Date.now()); }
+        catch (error) { console.error("Manual Paper backfill start failed", error); }
+      }
       if (!backfill || !backfill.complete) {
-        const progress = backfill
-          ? "وضعیت: دریافت تاریخچه در حال انجام است. صفحات دریافت‌شده: " + backfill.pages +
-            "\nشروع تاریخچه: " + new Date(backfill.startAt).toISOString() +
-            "\nآخرین خطا: " + (backfill.lastError ?? "ندارد")
-          : "آرشیو تاریخی هنوز آغاز نشده؛ Worker در خارج از سشن‌های لندن/نیویورک آن را شروع می‌کند.";
+        const progress = !env.SIFTING_API_KEY
+          ? "کلید SiftingIO برای دریافت تاریخچه تنظیم نشده است."
+          : backfill
+            ? "وضعیت: دریافت تاریخچه در حال انجام است. صفحات دریافت‌شده: " + backfill.pages +
+              "\nشروع تاریخچه: " + new Date(backfill.startAt).toISOString() +
+              "\nآخرین خطا: " + (backfill.lastError ?? "ندارد")
+            : "آرشیو تاریخی هنوز آغاز نشده؛ دریافت اولیه با فرمان /backtest شروع می‌شود.";
         await sendTelegram(env, "بک‌تست ماهانه هنوز آماده نیست.\n" + progress +
           "\n\nبرای رعایت سهمیه رایگان SiftingIO، دریافت تاریخچه با فاصله حداقل ۱۰ دقیقه بین درخواست‌ها انجام می‌شود.");
       } else {
