@@ -195,8 +195,8 @@ test("opposing Macro and Quant conclusions block before coordinator approval", a
   const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "BLOCKED");
-  assert.ok(run.result.blockers.some((item) => item.includes("Macro and Quant specialists have opposing")));
-  assert.equal(calls.some((item) => item.role === "main_coordinator"), false);
+  assert.ok(run.result.blockers.some((item) => item.includes("متخصصان Macro و Quant")));
+  assert.deepEqual(calls.map((item) => item.role), ["macro", "quant"]);
 });
 
 test("unverified candle provenance blocks before any model inference", async () => {
