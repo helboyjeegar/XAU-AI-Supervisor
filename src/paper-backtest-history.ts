@@ -4,7 +4,7 @@ import type { Candle } from "./types.ts";
 const API_BASE = "https://api.sifting.io/v1/hist/commodities/XAUUSD/bars";
 const PAGE_SIZE = 2_000;
 const MIN_REQUEST_GAP = 10 * 60_000;
-const HISTORY_DAYS = 180;
+const HISTORY_MONTHS = 6;
 
 export interface BackfillStatus {
   active: boolean;
@@ -47,7 +47,7 @@ export async function backfillPaperHistory(db: D1Database, apiKey: string | unde
   let state = await db.prepare("SELECT * FROM paper_backfill_state WHERE id=1").first<BackfillRow>();
   if (!state) {
     const endAt = Math.floor(now / 60_000) * 60_000;
-    const startAt = endAt - HISTORY_DAYS * 86_400_000;
+    const current = new Date(endAt);\n    const startAt = Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - HISTORY_MONTHS, 1);
     await db.prepare(`INSERT OR IGNORE INTO paper_backfill_state
       (id,start_at,end_at,cursor,last_request_at,pages,complete,last_error)
       VALUES(1,?,?,NULL,0,0,0,NULL)`).bind(startAt,endAt).run();
