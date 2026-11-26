@@ -45,7 +45,7 @@ function normalizeSymbol(value: unknown): string | null {
   return ["XAUUSD", "GOLD"].includes(normalized) ? "XAUUSD" : null;
 }
 
-function validateCandles(value: unknown): { candles?: Candle[]; error?: string } {
+function validateCandles(value: unknown, timeframe: Timeframe): { candles?: Candle[]; error?: string } {
   if (!Array.isArray(value) || value.length < 1 || value.length > 200) return { error: "candles must contain 1 to 200 items" };
   const candles: Candle[] = [];
   let previousTime = 0;
@@ -55,7 +55,10 @@ function validateCandles(value: unknown): { candles?: Candle[]; error?: string }
     const numbers = [time, item.open, item.high, item.low, item.close, item.volume ?? 0];
     if (numbers.some((n) => typeof n !== "number" || !Number.isFinite(n))) return { error: "candle fields must be finite numbers or an ISO timestamp" };
     const [ts, open, high, low, close, volume] = numbers as number[];
-    if (ts <= previousTime || ts <= 0) return { error: "candles must be in ascending time order without duplicates" };
+    const intervalMs = timeframe === "1m" ? 60_000 : timeframe === "5m" ? 300_000 : 1_800_000;
+    if (!Number.isSafeInteger(ts) || ts <= previousTime || ts <= 0 || ts % intervalMs !== 0) {
+      return { error: "candle timestamps must be safe integer UTC bucket times aligned to the requested timeframe" };
+    }
     if (open <= 0 || high <= 0 || low <= 0 || close <= 0 || volume < 0 || high < Math.max(open, close, low) || low > Math.min(open, close, high)) return { error: "invalid OHLCV relationship or value" };
     candles.push({ time: ts, open, high, low, close, volume });
     previousTime = ts;
@@ -465,7 +468,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
     const symbol = normalizeSymbol(body.symbol);
     const timeframe = body.timeframe;
     if (!symbol || !["1m", "5m", "30m"].includes(String(timeframe))) return json({ ok: false, error: "Only XAUUSD and timeframes 1m, 5m, 30m are supported" }, 422);
-    const checked = validateCandles(body.candles);
+    const checked = validateCandles(body.candles, timeframe as Timeframe);
     if (!checked.candles) return json({ ok: false, error: checked.error }, 422);
     const written = await storeCandles(env.DB, symbol, timeframe as Timeframe, checked.candles);
     return json({ ok: true, symbol, timeframe, received: written });
