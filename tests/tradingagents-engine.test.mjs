@@ -198,3 +198,14 @@ test("opposing Macro and Quant conclusions block before coordinator approval", a
   assert.ok(run.result.blockers.some((item) => item.includes("Macro and Quant specialists have opposing")));
   assert.equal(calls.some((item) => item.role === "main_coordinator"), false);
 });
+
+test("unverified candle provenance blocks before any model inference", async () => {
+  const { ai, calls } = mockAi();
+  const run = await runTradingAgentsResearch(input({
+    marketDataSource: "D1 candle store; market-data source attribution unverified",
+  }), ai, true, async () => true);
+  assert.equal(run.result.verdict, "NO_TRADE");
+  assert.equal(run.result.researchStatus, "BLOCKED");
+  assert.ok(run.result.blockers.some((item) => item.includes("منبع داده کندل‌ها")));
+  assert.equal(calls.length, 0);
+});
