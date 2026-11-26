@@ -194,13 +194,21 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
       };
     }
   }
-  const [one, five, thirty, risk, storedMacro] = await Promise.all([
+  const [one, five, thirty, risk, storedMacro, feed] = await Promise.all([
     loadCandles(env.DB, "XAUUSD", "1m", 300),
     loadCandles(env.DB, "XAUUSD", "5m", 300),
     loadCandles(env.DB, "XAUUSD", "30m", 300),
     readRisk(env),
     latestMacroContext(env.DB),
+    env.DB.prepare("SELECT last_success_at,last_bar_at,last_error FROM market_feed_state WHERE provider='siftingio'")
+      .first<{last_success_at:number|null;last_bar_at:number|null;last_error:string|null}>(),
   ]);
+  const feedVerified = Boolean(feed?.last_success_at && feed.last_error === null &&
+    now >= feed.last_success_at && now - feed.last_success_at <= 7 * 60_000 &&
+    feed.last_bar_at !== null && one.at(-1)?.time === feed.last_bar_at);
+  const marketDataSource = feedVerified
+    ? "SiftingIO XAUUSD reference feed (latest M1 bar matched to feed state)"
+    : "D1 candle store; market-data source attribution unverified";
   const execution = await runTradingAgentsResearch({
     oneMinute: one, fiveMinute: five, thirtyMinute: thirty, macro: storedMacro,
     risk, now, modelName: env.AI_MODEL || "@cf/google/gemma-4-26b-a4b-it",
@@ -209,7 +217,7 @@ async function runAnalysis(env: Env, notify = true): Promise<AnalysisResult> {
     macroMaxAgeMinutes: setting(env.MACRO_MAX_AGE_MINUTES, 30),
     highImpactBlockMinutes: setting(env.HIGH_IMPACT_BLOCK_MINUTES, 15),
     riskMaxAgeMs: setting(env.RISK_MAX_AGE_MINUTES, 2) * 60_000,
-    marketDataSource: env.SIFTING_API_KEY ? "SiftingIO XAUUSD reference feed" : "D1 candle store; provider not recorded",
+    marketDataSource,
   }, env.AI, env.ENABLE_TRADINGAGENTS === "true", () => reserveAiRunBudget(
     env.DB!, tradingDayKey("UTC", new Date(now)),
     setting(env.TRADINGAGENTS_MAX_RUNS_PER_UTC_DAY, 8), now,
