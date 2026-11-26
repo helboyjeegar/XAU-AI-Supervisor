@@ -192,7 +192,9 @@ test("oversized AI input is rejected before inference", async () => {
 
 test("opposing Macro and Quant conclusions block before coordinator approval", async () => {
   const { ai, calls } = mockAi({ macroDirection: "BEARISH" });
-  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
+  const run = await runTradingAgentsResearch(input({
+    macro: { ...input().macro, dxyTrend: "BEARISH" },
+  }), ai, true, async () => true);
   assert.equal(run.result.verdict, "NO_TRADE");
   assert.equal(run.result.researchStatus, "BLOCKED");
   assert.ok(run.result.blockers.some((item) => item.includes("متخصصان Macro و Quant")));
@@ -208,4 +210,13 @@ test("unverified candle provenance blocks before any model inference", async () 
   assert.equal(run.result.researchStatus, "BLOCKED");
   assert.ok(run.result.blockers.some((item) => item.includes("منبع داده کندل‌ها")));
   assert.equal(calls.length, 0);
+});
+
+test("calendar-only Macro output cannot create a directional gold thesis", async () => {
+  const { ai, calls } = mockAi({ macroDirection: "BEARISH" });
+  const run = await runTradingAgentsResearch(input(), ai, true, async () => true);
+  assert.equal(run.result.verdict, "BUY");
+  assert.equal(run.reports[0].direction, "NEUTRAL");
+  assert.ok(run.reports[0].warnings.some((item) => item.includes("فقط تقویم رویدادها")));
+  assert.ok(calls.some((item) => item.role === "main_coordinator"));
 });
