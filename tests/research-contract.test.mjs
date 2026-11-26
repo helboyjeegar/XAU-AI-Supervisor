@@ -90,3 +90,13 @@ test("fails closed outside London and New York sessions", () => {
   assert.equal(result.eligibleForCoordinatorDecision, false);
   assert.ok(result.blockers.some((item) => item.includes("Outside the allowed London/New York")));
 });
+
+test("opposing non-neutral Macro and Quant conclusions block coordinator synthesis", () => {
+  const input = reports();
+  input[0].direction = "BEARISH";
+  input[1].direction = "BULLISH";
+  const result = assessResearchBundle({ reports: input, evidence, evidenceScore: 100, now, sessionAllowed: true });
+  assert.equal(result.eligibleForCoordinatorDecision, false);
+  assert.equal(result.candidateSide, null);
+  assert.ok(result.blockers.some((item) => item.includes("Macro and Quant specialists have opposing")));
+});
