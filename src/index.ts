@@ -395,7 +395,7 @@ async function handleTelegram(request: Request, env: Env): Promise<Response> {
       const [state,open,closed,feed] = await Promise.all([
         env.DB.prepare("SELECT balance,equity,peak_equity,daily_start_equity,daily_locked,updated_at FROM paper_state WHERE id=1").first<{balance:number;equity:number;peak_equity:number;daily_start_equity:number;daily_locked:number;updated_at:number}>(),
         env.DB.prepare("SELECT side,lots,entry_price,stop_loss,take_profit,opened_at FROM paper_positions WHERE status='OPEN' ORDER BY opened_at DESC LIMIT 1").first<{side:string;lots:number;entry_price:number;stop_loss:number;take_profit:number;opened_at:number}>(),
-        env.DB.prepare("SELECT side,net_pnl,return_percent,entry_price,exit_price,closed_at,close_reason FROM paper_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT 5").all<{side:string;net_pnl:number;entry_price:number;exit_price:number;closed_at:number;close_reason:string}>(),
+        env.DB.prepare("SELECT side,net_pnl,entry_price,exit_price,closed_at,close_reason FROM paper_positions WHERE status='CLOSED' ORDER BY closed_at DESC LIMIT 5").all<{side:string;net_pnl:number;entry_price:number;exit_price:number;closed_at:number;close_reason:string}>(),
         env.DB.prepare("SELECT last_success_at,last_bar_at,last_error FROM market_feed_state WHERE provider='siftingio'").first<{last_success_at:number|null;last_bar_at:number|null;last_error:string|null}>(),
       ]);
       const lines = [
