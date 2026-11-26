@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS market_candles (
   symbol TEXT NOT NULL,
   timeframe TEXT NOT NULL CHECK (timeframe IN ('1m', '5m', '30m')),
