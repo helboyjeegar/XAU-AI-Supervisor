@@ -7,7 +7,12 @@ export async function storeCandles(db: D1Database, symbol: string, timeframe: Ti
       `INSERT INTO market_candles (symbol, timeframe, ts, open, high, low, close, volume)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(symbol, timeframe, ts) DO UPDATE SET
-       open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, volume=excluded.volume`
+       open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, volume=excluded.volume
+       WHERE market_candles.open IS NOT excluded.open
+          OR market_candles.high IS NOT excluded.high
+          OR market_candles.low IS NOT excluded.low
+          OR market_candles.close IS NOT excluded.close
+          OR market_candles.volume IS NOT excluded.volume`
     ).bind(symbol, timeframe, c.time, c.open, c.high, c.low, c.close, c.volume));
     if (batch.length) {
       await db.batch(batch);
