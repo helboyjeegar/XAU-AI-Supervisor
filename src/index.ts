@@ -606,7 +606,10 @@ export default {
           await runAnalysis(env);
         }
       } catch (error) {
-        console.error("Scheduled XAU supervisor task failed", error);
+        const details = error instanceof Error
+          ? error.name + ": " + error.message + (error.stack ? "\n" + error.stack : "")
+          : String(error);
+        console.error("Scheduled XAU supervisor task failed: " + details);
       }
     })());
   },

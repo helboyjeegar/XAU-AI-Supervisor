@@ -2,8 +2,10 @@ import { storeCandles } from "./storage.ts";
 import type { Candle } from "./types.ts";
 
 const API_BASE = "https://api.sifting.io/v1/hist/commodities/XAUUSD/bars";
-const PAGE_SIZE = 2_000;
-const MIN_REQUEST_GAP = 10 * 60_000;
+// Keep historical writes well below Cloudflare Free D1's account-wide 100k rows/day cap.
+// One page/hour and a half is ~10.5k inserted candles per quiet overnight window.
+const PAGE_SIZE = 1_500;
+const MIN_REQUEST_GAP = 90 * 60_000;
 const HISTORY_MONTHS = 6;
 
 export interface BackfillStatus {
@@ -41,7 +43,7 @@ export async function getBackfillStatus(db: D1Database): Promise<BackfillStatus 
   };
 }
 
-/** Fetches one historical 1m page at most every ten minutes. It never changes live-feed watermarks. */
+/** Fetches one historical 1m page at most every 90 minutes. It never changes live-feed watermarks. */
 export async function backfillPaperHistory(db: D1Database, apiKey: string | undefined, now = Date.now()): Promise<BackfillStatus | null> {
   if (!apiKey) return null;
   let state = await db.prepare("SELECT * FROM paper_backfill_state WHERE id=1").first<BackfillRow>();
