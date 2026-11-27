@@ -575,7 +575,14 @@ export default {
     if (!env.DB) return;
     ctx.waitUntil((async () => {
       try {
-        if (controller.cron === "5 0 * * *") {
+        if (controller.cron === "17 */2 * * *") {
+          // Backtest-only history collection: never refresh the live feed or process Paper trades.
+          const history = await getBackfillStatus(env.DB!);
+          if (!history?.complete && env.SIFTING_API_KEY) {
+            await backfillPaperHistory(env.DB!, env.SIFTING_API_KEY, Date.now());
+          }
+          return;
+        } else if (controller.cron === "5 0 * * *") {
           await sendPaperDailyReport(env);
         } else if (controller.cron === "0 2 * * *") {
           const retention = Date.now() - 400 * 24 * 60 * 60 * 1000;
